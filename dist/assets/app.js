@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-37";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-37";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-38";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-38";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-37";
+} from "./openings.js?v=20260912-38";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-37";
+} from "./topology.js?v=20260912-38";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-37";
+} from "./joints.js?v=20260912-38";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-37";
+} from "./assemblies.js?v=20260912-38";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-37";
+} from "./installations.js?v=20260912-38";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -3369,6 +3369,94 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return points.map(([px, py], index) => `${index === 0 ? "M" : "L"}${px} ${py}`).join(" ") + " Z";
     }
 
+    function windowShapePoints3d(win, width, height) {
+      const shape = normalizeWindowShape(win.shape);
+      const type = shape.type || "rectangular";
+      const halfW = width / 2;
+      const halfH = height / 2;
+      if (type === "arched") {
+        const rise = Math.min(height * 0.32, Math.max(width * 0.012, Number(shape.archHeightMm || 220) * (width / Math.max(1, win.widthMm))));
+        const leftY = halfH - rise;
+        const control = { x: 0, y: halfH + rise * 0.75 };
+        const left = { x: -halfW, y: leftY };
+        const right = { x: halfW, y: leftY };
+        const arch = Array.from({ length: 15 }, (_, index) => {
+          const t = index / 14;
+          const inv = 1 - t;
+          return {
+            x: inv * inv * left.x + 2 * inv * t * control.x + t * t * right.x,
+            y: inv * inv * left.y + 2 * inv * t * control.y + t * t * right.y
+          };
+        });
+        return [...arch, { x: halfW, y: -halfH }, { x: -halfW, y: -halfH }];
+      }
+      if (type === "trapezoid") {
+        const shift = Math.min(width * 0.18, 90 * (width / Math.max(1, win.widthMm)));
+        return [
+          { x: -halfW + shift, y: halfH },
+          { x: halfW, y: halfH },
+          { x: halfW - shift, y: -halfH },
+          { x: -halfW, y: -halfH }
+        ];
+      }
+      if (type === "trapezoid_left") {
+        const shift = Math.min(width * 0.18, 90 * (width / Math.max(1, win.widthMm)));
+        return [
+          { x: -halfW, y: halfH },
+          { x: halfW - shift, y: halfH },
+          { x: halfW, y: -halfH },
+          { x: -halfW + shift, y: -halfH }
+        ];
+      }
+      if (type === "trapezoid_peak") {
+        const peak = Math.min(height * 0.3, Math.max(width * 0.018, 110 * (height / Math.max(1, win.heightMm))));
+        return [
+          { x: -halfW, y: halfH - peak },
+          { x: 0, y: halfH },
+          { x: halfW, y: halfH - peak },
+          { x: halfW, y: -halfH },
+          { x: -halfW, y: -halfH }
+        ];
+      }
+      if (type === "notch_top_left") {
+        const notch = Math.min(width * 0.28, height * 0.32, 130 * (width / Math.max(1, win.widthMm)));
+        return [
+          { x: -halfW + notch, y: halfH },
+          { x: halfW, y: halfH },
+          { x: halfW, y: -halfH },
+          { x: -halfW, y: -halfH },
+          { x: -halfW, y: halfH - notch }
+        ];
+      }
+      if (type === "notch_top_right") {
+        const notch = Math.min(width * 0.28, height * 0.32, 130 * (width / Math.max(1, win.widthMm)));
+        return [
+          { x: -halfW, y: halfH },
+          { x: halfW - notch, y: halfH },
+          { x: halfW, y: halfH - notch },
+          { x: halfW, y: -halfH },
+          { x: -halfW, y: -halfH }
+        ];
+      }
+      if (type === "custom_polygon") {
+        const points = normalizeShapePoints(shape.points).map(point => ({
+          x: -halfW + point.x / 100 * width,
+          y: halfH - point.y / 100 * height
+        }));
+        if (points.length >= 3) return points;
+      }
+      return [
+        { x: -halfW, y: halfH },
+        { x: halfW, y: halfH },
+        { x: halfW, y: -halfH },
+        { x: -halfW, y: -halfH }
+      ];
+    }
+
+    function isRectangularWindowShape(win) {
+      return normalizeWindowShape(win.shape).type === "rectangular";
+    }
+
     function insetPolygonTowardCentroid(points, inset) {
       if (!points.length) return [];
       const center = points.reduce((acc, [px, py]) => ({ x: acc.x + px, y: acc.y + py }), { x: 0, y: 0 });
@@ -4219,7 +4307,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       wallHost.add(frameMount);
 
       if (showOpening) addShowroomOpening(wallHost, width, height, face, depth, mats, win, scale, cornerMount, showOrientationLabels);
-      addMountedOuterFrame(frameMount, width, height, face, depth, mats, cornerMount);
+      addMountedOuterFrame(frameMount, win, width, height, face, depth, mats, cornerMount);
       for (let c = 1; c < colEdges.length - 1; c += 1) {
         addBox(frameMount, colEdges[c], 0, 0.01, face * 0.82, innerH, depth * 0.92, mats.profile);
       }
@@ -4289,8 +4377,12 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       };
     }
 
-    function addMountedOuterFrame(parent, width, height, face, depth, mats, cornerMount) {
+    function addMountedOuterFrame(parent, win, width, height, face, depth, mats, cornerMount) {
       if (!cornerMount) {
+        if (!isRectangularWindowShape(win)) {
+          addThreeShapeFrame(parent, windowShapePoints3d(win, width, height), face, depth, mats.profile);
+          return;
+        }
         addBox(parent, 0, height / 2 - face / 2, 0, width, face, depth, mats.profile);
         addBox(parent, 0, -height / 2 + face / 2, 0, width, face, depth, mats.profile);
         addBox(parent, -width / 2 + face / 2, 0, 0, face, height, depth, mats.profile);
@@ -4316,6 +4408,22 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       }
       addBox(returnFrame, cornerMount.returnSpan - face / 2, 0, 0, face, height, depth, mats.profile);
       parent.add(returnFrame);
+    }
+
+    function addThreeShapeFrame(parent, points, face, depth, material) {
+      if (!Array.isArray(points) || points.length < 3) return;
+      const railWidth = Math.max(0.012, face * 0.82);
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length <= 0.002) continue;
+        const rail = addBox(parent, (start.x + end.x) / 2, (start.y + end.y) / 2, 0, length, railWidth, depth, material);
+        rail.rotation.z = Math.atan2(dy, dx);
+        rail.userData.mountType = "shape-frame-rail";
+      }
     }
 
     function addThreeTopologyMembers(parent, win, colEdges, rowEdges, face, depth, mats) {
@@ -5076,11 +5184,22 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       if (cornerMount) {
         addCornerReturnWall(parent, cornerMount, height, sillHeight, face, depth, wallBand, wallDepth, wallCenterZ, mats);
       } else {
-        addBox(parent, (topStartX + topEndX) / 2, height / 2 + wallBand / 2, wallCenterZ, topEndX - topStartX, wallBand, wallDepth, mats.wall);
-        addBox(parent, frontLeftX - wallBand / 2, sideCenterY, wallCenterZ, wallBand, sideHeight, wallDepth, mats.wall);
-        addBox(parent, frontRightX + wallBand / 2, sideCenterY, wallCenterZ, wallBand, sideHeight, wallDepth, mats.wall);
-        if (sillHeight > 0.001) {
-          addBox(parent, frontLeftX + frontSpan / 2, floorY + sillHeight / 2, wallCenterZ, frontSpan, sillHeight, wallDepth, mats.wall);
+        if (!isRectangularWindowShape(win)) {
+          addThreeWallPanelWithOpening(
+            parent,
+            windowShapePoints3d(win, width, height),
+            { left: topStartX, right: topEndX, bottom: floorY, top: height / 2 + wallBand },
+            wallDepth,
+            wallCenterZ,
+            mats.wall
+          );
+        } else {
+          addBox(parent, (topStartX + topEndX) / 2, height / 2 + wallBand / 2, wallCenterZ, topEndX - topStartX, wallBand, wallDepth, mats.wall);
+          addBox(parent, frontLeftX - wallBand / 2, sideCenterY, wallCenterZ, wallBand, sideHeight, wallDepth, mats.wall);
+          addBox(parent, frontRightX + wallBand / 2, sideCenterY, wallCenterZ, wallBand, sideHeight, wallDepth, mats.wall);
+          if (sillHeight > 0.001) {
+            addBox(parent, frontLeftX + frontSpan / 2, floorY + sillHeight / 2, wallCenterZ, frontSpan, sillHeight, wallDepth, mats.wall);
+          }
         }
         addBox(parent, frontLeftX + frontSpan / 2, -height / 2 + face * 0.18, depth * 0.05, frontSpan + face * 1.05, face * 0.3, depth * 2.5, mats.sill);
       }
@@ -5101,6 +5220,39 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         const z = wallCenterZ - wallDepth / 2 - boardThickness / 2;
         geometry.sides.forEach(side => addThreeSurroundSide(parent, side, width, height, trimWidth, boardThickness, z, mats.surroundInside));
       }
+    }
+
+    function addThreeWallPanelWithOpening(parent, openingPoints, bounds, wallDepth, wallCenterZ, material) {
+      const THREE = threeLib;
+      if (!THREE || !Array.isArray(openingPoints) || openingPoints.length < 3) return;
+      const shape = new THREE.Shape();
+      shape.moveTo(bounds.left, bounds.bottom);
+      shape.lineTo(bounds.right, bounds.bottom);
+      shape.lineTo(bounds.right, bounds.top);
+      shape.lineTo(bounds.left, bounds.top);
+      shape.closePath();
+      const hole = new THREE.Path();
+      [...openingPoints].reverse().forEach((point, index) => {
+        if (index === 0) hole.moveTo(point.x, point.y);
+        else hole.lineTo(point.x, point.y);
+      });
+      hole.closePath();
+      shape.holes.push(hole);
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth: wallDepth,
+        bevelEnabled: false,
+        curveSegments: 8,
+        steps: 1
+      });
+      geometry.translate(0, 0, wallCenterZ - wallDepth / 2);
+      geometry.computeVertexNormals();
+      applyScaledWallUvs(geometry, material);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.mountType = "shaped-wall-opening";
+      parent.add(mesh);
+      return mesh;
     }
 
     function addCornerReturnWall(parent, cornerMount, height, sillHeight, face, depth, wallBand, wallDepth, wallCenterZ, mats) {

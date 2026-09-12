@@ -85,6 +85,9 @@ assert.ok(schema.properties.customShapes, "v2 schema should persist saved DIY sh
 assert.ok(schema.$defs.customShapeElement, "v2 schema should describe named reusable DIY shape elements");
 assert.ok(schema.$defs.cellCustomShape, "v2 schema should describe DIY geometry attached to an individual cell");
 assert.ok(schema.$defs.cell.properties.customShape, "v2 cells should be able to carry a selected DIY shape");
+["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon"].forEach(shapeType => {
+  assert.ok(schema.$defs.shape.properties.type.enum.includes(shapeType), `${shapeType} should be a valid saved window shape`);
+});
 
 const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
 [

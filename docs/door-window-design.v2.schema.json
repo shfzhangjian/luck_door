@@ -247,7 +247,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["rectangular", "arched", "trapezoid", "round", "polygon"]
+          "enum": ["rectangular", "arched", "trapezoid", "trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon", "round", "polygon"]
         },
         "archHeightMm": { "type": "number", "minimum": 0 },
         "polygonPoints": {

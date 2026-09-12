@@ -367,6 +367,9 @@ assert.ok(app.includes('marker-end="url(#planMotionArrow)"'), "the plan opening 
 assert.ok(app.includes("const SHAPE_PRESETS = Object.freeze"), "the designer should maintain a single supported-shape catalog");
 assert.ok(app.includes("function normalizeWindowShape("), "window shape data should be normalized before drawing or saving");
 assert.ok(app.includes("function polygonFramePath("), "custom shape presets should render as real frame paths instead of inert buttons");
+assert.ok(app.includes("function windowShapePoints3d("), "3D preview should derive its outer outline from the saved window shape");
+assert.ok(app.includes("function addThreeShapeFrame("), "3D preview should build sloped and custom outer frames instead of always using rectangular rails");
+assert.ok(app.includes("function addThreeWallPanelWithOpening("), "3D wall openings should follow sloped, notched, arched, and DIY window outlines");
 assert.ok(app.includes("function parseShapePointsText("), "DIY polygon frames should parse editable point coordinates");
 assert.ok(app.includes("function insetPolygonTowardCentroid("), "DIY polygon frames should generate an inner frame path from the outer outline");
 assert.ok(app.includes("function renderCustomShapeAnnotations("), "DIY polygon frames should display edge lengths and vertex angles");
