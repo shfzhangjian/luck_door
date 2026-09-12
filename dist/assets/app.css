@@ -856,10 +856,12 @@
     }
 
     .plan-wall-outline {
+      fill: none;
       stroke: #94a3ad;
     }
 
     .plan-frame-outline {
+      fill: none;
       stroke: #364246;
     }
 

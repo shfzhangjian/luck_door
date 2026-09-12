@@ -350,6 +350,7 @@ assert.ok(app.includes("const anchorX = width / 2;"), "the 3D corner should star
 assert.ok(app.includes("const returnSpan = frontWingSpan;"), "the return-wall opening should retain a full corner-wing width");
 assert.ok(app.includes("renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, section)"), "the 2D plan wall should fold with the corner structure");
 assert.ok(app.includes("plan-frame-overhang"), "the 2D plan wall should mark frames that project beyond the wall face");
+assert.ok(app.includes("function bandPolygon("), "corner plan walls and frames should be drawn as closed plan bands instead of centerline strokes");
 assert.ok(app.includes("function addMiteredWallBand("), "the front and return wall bands should be generated as one mitered corner body");
 assert.ok(app.includes('mesh.userData.mountType = "continuous-corner-wall"'), "the 3D wall corner should remain a continuous host around the opening");
 assert.ok(!app.includes("const cornerBodyDepth = Math.max(wallDepth"), "a full-height wall block must not occupy the corner-window opening");

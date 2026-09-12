@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-28";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-28";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-29";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-29";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-28";
+} from "./openings.js?v=20260912-29";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-28";
+} from "./topology.js?v=20260912-29";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-28";
+} from "./joints.js?v=20260912-29";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-28";
+} from "./assemblies.js?v=20260912-29";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-28";
+} from "./installations.js?v=20260912-29";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2939,21 +2939,50 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
           <path class="plan-frame-outline" d="M${x} ${frameTopY}H${x + drawW}M${x} ${frameBottomY}H${x + drawW}" />`;
       }
       const wallCenterY = planY - section.wallCenterPx;
-      const wallPath = `M${x} ${wallCenterY} H${cornerMount.wallCornerX} L${cornerMount.endX} ${cornerMount.endY - section.wallCenterPx}`;
       const normalX = Math.sin(cornerMount.radians);
       const normalY = Math.cos(cornerMount.radians);
-      const framePath = `M${x} ${planY} H${cornerMount.anchorX} M${cornerMount.returnOpeningStartX} ${cornerMount.returnOpeningStartY} L${cornerMount.endX} ${cornerMount.endY}`;
+      const returnWallStart = { x: cornerMount.wallCornerX, y: wallCenterY };
+      const returnWallEnd = { x: cornerMount.endX, y: cornerMount.endY - section.wallCenterPx };
+      const mainWall = rectPolygon(x, wallTopY, cornerMount.wallCornerX - x, wallBottomY - wallTopY);
+      const returnWall = bandPolygon(returnWallStart, returnWallEnd, { x: normalX, y: normalY }, wallThicknessPx);
+      const mainFrame = rectPolygon(x, frameTopY, cornerMount.anchorX - x, frameHeight);
+      const returnFrame = bandPolygon(
+        { x: cornerMount.returnOpeningStartX, y: cornerMount.returnOpeningStartY },
+        { x: cornerMount.endX, y: cornerMount.endY },
+        { x: normalX, y: normalY },
+        frameHeight
+      );
       const cornerPier = renderPlanCornerWallPier(cornerMount, wallThicknessPx, outlineColor);
       return `
-        <path class="plan-wall-band" d="${wallPath}" fill="none" stroke-width="${wallThicknessPx}" stroke-linecap="square" stroke-linejoin="miter" />
-        <path class="plan-frame-band" d="${framePath}" fill="none" stroke-width="${frameHeight}" stroke-linecap="square" stroke-linejoin="miter" />
-        <path class="plan-wall-center" d="${wallPath}" fill="none" />
-        ${frameOverhang ? `<path class="plan-frame-overhang" d="${framePath}" fill="none" stroke-width="${frameHeight}" stroke-linecap="square" stroke-linejoin="miter" />` : ""}
-        <path class="plan-wall-outline" d="${wallPath}" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" />
-        <path class="plan-frame-outline" d="${framePath}" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" />
+        <polygon class="plan-wall-band" points="${mainWall}" />
+        <polygon class="plan-wall-band" points="${returnWall}" />
+        <polygon class="plan-frame-band" points="${mainFrame}" />
+        <polygon class="plan-frame-band" points="${returnFrame}" />
+        <path class="plan-wall-center" d="M${x} ${wallCenterY}H${cornerMount.wallCornerX}M${returnWallStart.x} ${returnWallStart.y}L${returnWallEnd.x} ${returnWallEnd.y}" fill="none" />
+        ${frameOverhang ? `<polygon class="plan-frame-overhang" points="${mainFrame}" /><polygon class="plan-frame-overhang" points="${returnFrame}" />` : ""}
+        <polygon class="plan-wall-outline" points="${mainWall}" />
+        <polygon class="plan-wall-outline" points="${returnWall}" />
+        <polygon class="plan-frame-outline" points="${mainFrame}" />
+        <polygon class="plan-frame-outline" points="${returnFrame}" />
         ${cornerPier}
         <text class="plan-side outside" x="${cornerMount.endX + normalX * 28}" y="${cornerMount.endY + normalY * 28}">外</text>
         <text class="plan-side inside" x="${cornerMount.endX - normalX * 28}" y="${cornerMount.endY - normalY * 28}">内</text>`;
+    }
+
+    function rectPolygon(x, y, width, height) {
+      const right = x + Math.max(0, width);
+      const bottom = y + Math.max(1, height);
+      return [[x, y], [right, y], [right, bottom], [x, bottom]].map(point => point.join(",")).join(" ");
+    }
+
+    function bandPolygon(start, end, normal, thickness) {
+      const half = Math.max(0.5, thickness / 2);
+      return [
+        [start.x + normal.x * half, start.y + normal.y * half],
+        [end.x + normal.x * half, end.y + normal.y * half],
+        [end.x - normal.x * half, end.y - normal.y * half],
+        [start.x - normal.x * half, start.y - normal.y * half]
+      ].map(point => point.join(",")).join(" ");
     }
 
     function renderPlanCornerWallPier(cornerMount, wallThicknessPx, outlineColor) {
