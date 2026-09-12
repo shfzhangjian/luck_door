@@ -339,6 +339,7 @@ assert.equal(foldingPlan.panels.length, 3, "folding plan projection should prese
 assert.ok(foldingPlan.panels.some(panel => panel.corners.some(point => Math.abs(point.z) > 0.2)), "folding plan projection should show the opened stack outside the wall line");
 
 const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf8");
+const appLf = app.replace(/\r\n/g, "\n");
 assert.ok(app.includes("function addCornerTrackFrame("), "corner sliding should build fixed front and return-track frames before movable panels");
 assert.ok(app.includes("returnFrame.rotation.y = angle"), "the return track must use the configured structural corner angle");
 assert.ok(app.includes("function addCornerReturnWall("), "corner sliding should build a return wall around the side opening");
@@ -347,7 +348,8 @@ assert.ok(app.includes("function resolvePlanCornerMount("), "the indoor/outdoor 
 assert.ok(app.includes("const anchorX = item.x + item.w;"), "the 2D corner should start at the last cell boundary instead of splitting the cell in half");
 assert.ok(app.includes("const anchorX = width / 2;"), "the 3D corner should start at the full window boundary");
 assert.ok(app.includes("const returnSpan = frontWingSpan;"), "the return-wall opening should retain a full corner-wing width");
-assert.ok(app.includes("renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, wallThicknessPx)"), "the 2D plan wall should fold with the corner structure");
+assert.ok(app.includes("renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, section)"), "the 2D plan wall should fold with the corner structure");
+assert.ok(app.includes("plan-frame-overhang"), "the 2D plan wall should mark frames that project beyond the wall face");
 assert.ok(app.includes("function addMiteredWallBand("), "the front and return wall bands should be generated as one mitered corner body");
 assert.ok(app.includes('mesh.userData.mountType = "continuous-corner-wall"'), "the 3D wall corner should remain a continuous host around the opening");
 assert.ok(!app.includes("const cornerBodyDepth = Math.max(wallDepth"), "a full-height wall block must not occupy the corner-window opening");
@@ -365,7 +367,7 @@ assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-pr
 assert.ok(app.includes('root.userData.mountType = "parallel-project-hardware"'), "parallel-project hardware must remain outside the moving sash hierarchy");
 assert.ok(app.includes("mechanism.armLength ** 2 - depthGap ** 2"), "parallel-project linkage arms should retain a fixed mechanical length while their frame pivots slide");
 assert.ok(app.includes("normalizeSurround(win.installation?.surround).wallThicknessMm * drawW"), "the 2D indoor/outdoor plan should derive wall thickness from installation data");
-assert.ok(app.includes("cornerSlidingMotionVectors(\n          assembly.cornerAngleDeg,\n          rightWing,\n          travel,\n          0"), "corner sliding panels should stay on their rail without a free-space release offset");
-assert.ok(app.includes("updatePreviewSelection();\n      updatePreviewMotionReadout();"), "opening a selected panel should immediately remove its viewport outline");
+assert.ok(appLf.includes("cornerSlidingMotionVectors(assembly.cornerAngleDeg, rightWing, travel, 0)") || appLf.includes("cornerSlidingMotionVectors(\n          assembly.cornerAngleDeg,\n          rightWing,\n          travel,\n          0"), "corner sliding panels should stay on their rail without a free-space release offset");
+assert.ok(appLf.includes("updatePreviewSelection();\n      updatePreviewMotionReadout();"), "opening a selected panel should immediately remove its viewport outline");
 
 console.log(`Validated ${OPERABLE_TYPES.length} operable types, opening assemblies, 3D transforms, JSON contracts, and combination BOM mappings.`);

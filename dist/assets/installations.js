@@ -148,6 +148,27 @@ export function resolveFramePlacement(source, frameDepthMm = 70) {
   };
 }
 
+export function resolveInstallationSection(source, frameDepthMm = 70) {
+  const placement = resolveFramePlacement(source, frameDepthMm);
+  const wallCenterMm = placement.effectiveFrameOffsetMm;
+  const wallOutsideFaceMm = wallCenterMm + placement.wallThicknessMm / 2;
+  const wallInsideFaceMm = wallCenterMm - placement.wallThicknessMm / 2;
+  const frameOutsideFaceMm = placement.frameDepthMm / 2;
+  const frameInsideFaceMm = -placement.frameDepthMm / 2;
+  return {
+    ...placement,
+    wallCenterMm,
+    wallOutsideFaceMm,
+    wallInsideFaceMm,
+    frameCenterMm: 0,
+    frameOutsideFaceMm,
+    frameInsideFaceMm,
+    frameProjectsOutsideMm: Math.max(0, frameOutsideFaceMm - wallOutsideFaceMm),
+    frameProjectsInsideMm: Math.max(0, wallInsideFaceMm - frameInsideFaceMm),
+    frameEmbeddedMm: Math.max(0, Math.min(frameOutsideFaceMm, wallOutsideFaceMm) - Math.max(frameInsideFaceMm, wallInsideFaceMm))
+  };
+}
+
 export function surroundGeometry(source, widthMm, heightMm) {
   const surround = normalizeSurround(source);
   const width = Math.max(0, Number(widthMm || 0));

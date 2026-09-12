@@ -839,6 +839,38 @@
       text-anchor: end;
     }
 
+    .plan-wall-band {
+      fill: rgba(201, 208, 213, 0.62);
+      stroke: rgba(201, 208, 213, 0.62);
+    }
+
+    .plan-frame-band {
+      fill: rgba(54, 66, 70, 0.24);
+      stroke: rgba(54, 66, 70, 0.24);
+    }
+
+    .plan-wall-center {
+      stroke: rgba(95, 110, 120, 0.52);
+      stroke-width: 1;
+      stroke-dasharray: 5 4;
+    }
+
+    .plan-wall-outline {
+      stroke: #94a3ad;
+    }
+
+    .plan-frame-outline {
+      stroke: #364246;
+    }
+
+    .plan-frame-overhang {
+      fill: none;
+      stroke: #f59e0b;
+      stroke-width: 1.8;
+      stroke-dasharray: 6 4;
+      pointer-events: none;
+    }
+
     .plan-track {
       fill: none;
       stroke-width: 2.5;

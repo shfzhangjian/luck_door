@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-27";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-27";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-28";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-28";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-27";
+} from "./openings.js?v=20260912-28";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-27";
+} from "./topology.js?v=20260912-28";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-27";
+} from "./joints.js?v=20260912-28";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-27";
+} from "./assemblies.js?v=20260912-28";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -55,11 +55,12 @@ import {
   WALL_MATERIAL_OPTIONS,
   normalizeSurround,
   resolveFramePlacement,
+  resolveInstallationSection,
   resolveSurroundSides,
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-27";
+} from "./installations.js?v=20260912-28";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2534,17 +2535,17 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
 
     function renderPlanView(win, rects, x, planY, drawW, outlineColor, frameColor, options) {
       const cornerMount = resolvePlanCornerMount(win, rects, x, planY, drawW);
-      const wallThicknessPx = planWallThickness(win, drawW);
+      const section = planInstallationSection(win, drawW);
       const extents = estimatePlanProjectionExtents(win, rects, x, drawW);
       const parts = [
         `<g class="plan-view">`,
         `<text class="plan-side outside" x="${x - 58}" y="${planY - 46}">室外</text>`,
         `<text class="plan-side inside" x="${x - 58}" y="${planY + 64}">室内</text>`,
-        renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, wallThicknessPx)
+        renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, section)
       ];
       for (const item of rects) {
         parts.push(renderPlanCellTracks(item, planY, outlineColor, frameColor, cornerMount));
-        const projections = buildPlanOpeningParts(item.cell, item, planY, wallThicknessPx, cornerMount);
+        const projections = buildPlanOpeningParts(item.cell, item, planY, section.wallThicknessPx, cornerMount);
         projections.forEach(entry => {
           if (entry.kind === "folding") {
             parts.push(renderPlanFoldingProjection(entry.part, options.showOpenState ? 1 : 0, planY));
@@ -2565,11 +2566,34 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       return Math.max(16, Math.min(34, normalizeSurround(win.installation?.surround).wallThicknessMm * drawW / Math.max(1, win.widthMm)));
     }
 
-    function estimatePlanProjectionExtents(win, rects, x, drawW) {
+    function planInstallationSection(win, drawW) {
+      const series = currentSeries(win);
+      const frameDepthMm = Number(series?.frameDepthMm || series?.faceWidthMm || 70);
+      const raw = resolveInstallationSection(win.installation?.surround, frameDepthMm);
       const wallThicknessPx = planWallThickness(win, drawW);
+      const pxPerMm = wallThicknessPx / Math.max(1, raw.wallThicknessMm);
+      const convert = value => value * pxPerMm;
+      return {
+        ...raw,
+        wallThicknessPx,
+        pxPerMm,
+        wallCenterPx: convert(raw.wallCenterMm),
+        wallOutsidePx: convert(raw.wallOutsideFaceMm),
+        wallInsidePx: convert(raw.wallInsideFaceMm),
+        frameOutsidePx: convert(raw.frameOutsideFaceMm),
+        frameInsidePx: convert(raw.frameInsideFaceMm),
+        frameDepthPx: Math.max(10, raw.frameDepthMm * pxPerMm),
+        frameProjectsOutsidePx: Math.max(0, convert(raw.frameProjectsOutsideMm)),
+        frameProjectsInsidePx: Math.max(0, convert(raw.frameProjectsInsideMm))
+      };
+    }
+
+    function estimatePlanProjectionExtents(win, rects, x, drawW) {
+      const section = planInstallationSection(win, drawW);
+      const wallThicknessPx = section.wallThicknessPx;
       const cornerMount = resolvePlanCornerMount(win, rects, x, 0, drawW);
-      let outside = wallThicknessPx / 2;
-      let inside = wallThicknessPx / 2;
+      let outside = Math.max(section.wallOutsidePx, section.frameOutsidePx);
+      let inside = Math.max(-section.wallInsidePx, -section.frameInsidePx);
       rects.forEach(item => {
         buildPlanOpeningParts(item.cell, item, 0, wallThicknessPx, cornerMount).forEach(entry => {
           const sets = entry.kind === "folding"
@@ -2897,18 +2921,36 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       };
     }
 
-    function renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, wallThicknessPx) {
+    function renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, section) {
+      const wallThicknessPx = section.wallThicknessPx;
+      const wallTopY = planY - section.wallOutsidePx;
+      const wallBottomY = planY - section.wallInsidePx;
+      const frameTopY = planY - section.frameOutsidePx;
+      const frameBottomY = planY - section.frameInsidePx;
+      const frameHeight = Math.max(8, frameBottomY - frameTopY);
+      const frameOverhang = section.frameProjectsOutsidePx > 0.5 || section.frameProjectsInsidePx > 0.5;
       if (!cornerMount) {
-        return `<rect x="${x}" y="${planY - 6}" width="${drawW}" height="12" fill="${frameColor}" stroke="${outlineColor}" stroke-width="1.5" />`;
+        return `
+          <rect class="plan-wall-band" x="${x}" y="${wallTopY}" width="${drawW}" height="${Math.max(1, wallBottomY - wallTopY)}" />
+          <rect class="plan-frame-band" x="${x}" y="${frameTopY}" width="${drawW}" height="${frameHeight}" />
+          <line class="plan-wall-center" x1="${x}" y1="${planY - section.wallCenterPx}" x2="${x + drawW}" y2="${planY - section.wallCenterPx}" />
+          ${frameOverhang ? `<rect class="plan-frame-overhang" x="${x}" y="${frameTopY}" width="${drawW}" height="${frameHeight}" />` : ""}
+          <path class="plan-wall-outline" d="M${x} ${wallTopY}H${x + drawW}M${x} ${wallBottomY}H${x + drawW}" />
+          <path class="plan-frame-outline" d="M${x} ${frameTopY}H${x + drawW}M${x} ${frameBottomY}H${x + drawW}" />`;
       }
-      const wallPath = `M${x} ${planY} H${cornerMount.wallCornerX} L${cornerMount.endX} ${cornerMount.endY}`;
+      const wallCenterY = planY - section.wallCenterPx;
+      const wallPath = `M${x} ${wallCenterY} H${cornerMount.wallCornerX} L${cornerMount.endX} ${cornerMount.endY - section.wallCenterPx}`;
       const normalX = Math.sin(cornerMount.radians);
       const normalY = Math.cos(cornerMount.radians);
+      const framePath = `M${x} ${planY} H${cornerMount.anchorX} M${cornerMount.returnOpeningStartX} ${cornerMount.returnOpeningStartY} L${cornerMount.endX} ${cornerMount.endY}`;
       const cornerPier = renderPlanCornerWallPier(cornerMount, wallThicknessPx, outlineColor);
       return `
-        <path d="${wallPath}" fill="none" stroke="#c9d0d5" stroke-width="${wallThicknessPx}" stroke-linecap="square" stroke-linejoin="miter" />
-        <path d="${wallPath}" fill="none" stroke="${frameColor}" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter" />
-        <path d="${wallPath}" fill="none" stroke="${outlineColor}" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" />
+        <path class="plan-wall-band" d="${wallPath}" fill="none" stroke-width="${wallThicknessPx}" stroke-linecap="square" stroke-linejoin="miter" />
+        <path class="plan-frame-band" d="${framePath}" fill="none" stroke-width="${frameHeight}" stroke-linecap="square" stroke-linejoin="miter" />
+        <path class="plan-wall-center" d="${wallPath}" fill="none" />
+        ${frameOverhang ? `<path class="plan-frame-overhang" d="${framePath}" fill="none" stroke-width="${frameHeight}" stroke-linecap="square" stroke-linejoin="miter" />` : ""}
+        <path class="plan-wall-outline" d="${wallPath}" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" />
+        <path class="plan-frame-outline" d="${framePath}" fill="none" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" />
         ${cornerPier}
         <text class="plan-side outside" x="${cornerMount.endX + normalX * 28}" y="${cornerMount.endY + normalY * 28}">外</text>
         <text class="plan-side inside" x="${cornerMount.endX - normalX * 28}" y="${cornerMount.endY - normalY * 28}">内</text>`;
@@ -4357,10 +4399,10 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const wallMarginMm = Math.max(420, Math.min(900, Math.min(win.widthMm, win.heightMm) * 0.35));
       const wallBand = Math.max(face * 2.4, wallMarginMm * scale);
       const wallDepth = Math.max(0.06, installation.wallThicknessMm * scale);
-      const placement = resolveFramePlacement(installation, depth / scale);
+      const section = resolveInstallationSection(installation, depth / scale);
       // +Z is outside. frameOffsetMm is positive toward inside, so the wall center
       // moves by the same signed amount while the frame remains at local Z = 0.
-      const wallCenterZ = placement.effectiveFrameOffsetMm * scale;
+      const wallCenterZ = section.wallCenterMm * scale;
       const floorY = -height / 2 - sillHeight;
       const openingTopY = height / 2;
       const sideHeight = openingTopY - floorY;

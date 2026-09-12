@@ -6,6 +6,7 @@ import {
   WALL_CORNER_MODE_OPTIONS,
   WALL_MATERIAL_OPTIONS,
   defaultSurround,
+  resolveInstallationSection,
   normalizeSurround,
   resolveFramePlacement,
   resolveSurroundSides,
@@ -59,6 +60,12 @@ const customPlacement = resolveFramePlacement({ wallThicknessMm: 200, frameAlign
 assert.equal(customPlacement.effectiveFrameOffsetMm, 20);
 const overmountPlacement = resolveFramePlacement({ wallThicknessMm: 200, mountingMode: "exterior_overmount", exteriorMountGapMm: 10 }, 70);
 assert.equal(overmountPlacement.effectiveFrameOffsetMm, -145);
+const overmountSection = resolveInstallationSection({ wallThicknessMm: 200, mountingMode: "exterior_overmount", exteriorMountGapMm: 10 }, 70);
+assert.equal(overmountSection.wallOutsideFaceMm, -45);
+assert.equal(overmountSection.frameOutsideFaceMm, 35);
+assert.equal(overmountSection.frameProjectsOutsideMm, 80, "exterior overmount frames should visibly project beyond the outside wall face");
+const centeredSection = resolveInstallationSection({ wallThicknessMm: 200, frameAlignment: "center" }, 70);
+assert.equal(centeredSection.frameProjectsOutsideMm, 0, "opening-mounted centered frames should not be marked as wall overhangs");
 
 const bothSides = normalizeSurround({
   enabled: true,
@@ -150,13 +157,16 @@ assert.ok(app.includes("function updatePreviewGround(groundY = 0)"), "3D ground 
 assert.ok(!app.includes("const groundY = bounds.min.y - 0.025"), "3D ground must not move with the lowest generated mesh");
 assert.ok(app.includes('wallHost.userData.mountType = "wall-host"'), "3D windows should be mounted under a wall host");
 assert.ok(app.includes('frameMount.userData.mountType = "window-frame"'), "3D frames should use an installation mount below the wall host");
-assert.ok(app.includes("const wallCenterZ = placement.effectiveFrameOffsetMm * scale"), "3D wall depth should use the same centerline placement as the installation section");
+assert.ok(app.includes("function planInstallationSection("), "the plan view should resolve wall and frame depth from the shared installation section");
+assert.ok(app.includes("renderPlanWallBase(x, planY, drawW, outlineColor, frameColor, cornerMount, section)"), "the plan wall should draw from the shared installation section");
+assert.ok(app.includes("frameProjectsOutsidePx"), "the plan view should expose frame projection beyond the exterior wall face");
+assert.ok(app.includes("const wallCenterZ = section.wallCenterMm * scale"), "3D wall depth should use the same centerline placement as the installation section");
 assert.ok(!app.includes("const wallCenterZ = -wallDepth / 2 - installation.frameOffsetMm * scale"), "zero frame offset must not place the frame on the exterior wall face");
 assert.ok(app.includes("主立面：室外侧观察"), "3D preview should state which side of the primary facade is being observed");
 assert.ok(app.includes("const floorY = -height / 2 - sillHeight"), "wall openings should derive their bottom from sill height");
 assert.ok(app.includes("if (sillHeight > 0.001)"), "wall infill below the window should only exist above a non-zero sill");
 assert.ok(app.includes("const wallMarginMm = Math.max(420"), "3D walls should extend visibly beyond the opening");
-assert.ok(app.includes("resolveFramePlacement(installation, depth / scale)"), "3D wall and frame depth should be resolved by the shared installation placement rule");
+assert.ok(app.includes("resolveInstallationSection(installation, depth / scale)"), "3D wall and frame depth should be resolved by the shared installation section rule");
 assert.ok(app.includes("function createThreeGroundSideLabel("), "indoor/outdoor labels should be generated as ground markers");
 assert.ok(app.includes("new THREE.PlaneGeometry(0.52, 0.195)"), "ground labels should use horizontal plane geometry instead of camera-facing sprites");
 assert.ok(app.includes("marker.rotation.x = -Math.PI / 2"), "indoor/outdoor labels should lie flat on the finished floor");
