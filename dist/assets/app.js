@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-34";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-34";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-35";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-35";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-34";
+} from "./openings.js?v=20260912-35";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-34";
+} from "./topology.js?v=20260912-35";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-34";
+} from "./joints.js?v=20260912-35";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-34";
+} from "./assemblies.js?v=20260912-35";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-34";
+} from "./installations.js?v=20260912-35";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -91,6 +91,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     let activeModule = "draw";
     let lastMainModule = "draw";
     let bom = calculateProjectBom(project);
+    const diyShapeEditor = {
+      points: [],
+      selectedIndex: -1,
+      draggingIndex: -1
+    };
     let threeLib = null;
     let orbitControlsLib = null;
     let threeImporting = false;
@@ -154,6 +159,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           lastHash: "",
           events: []
         },
+        customShapes: [],
         integrations: {
           reservedEvents: [
             "design.submitted",
@@ -267,6 +273,18 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return Number.isInteger(value) ? String(value) : value.toFixed(1);
     }
 
+    function normalizeCustomShapeElement(value) {
+      const points = normalizeShapePoints(value?.points);
+      if (points.length < 3) return null;
+      return {
+        shapeId: String(value?.shapeId || `DIY-${Date.now().toString(36).toUpperCase()}`),
+        name: String(value?.name || "DIY异形框"),
+        windowId: String(value?.windowId || ""),
+        points,
+        createdAt: String(value?.createdAt || new Date().toISOString())
+      };
+    }
+
     function createCell(type = "fixed_glass", opening = "") {
       const normalizedOpening = normalizeOpening(type, opening || defaultOpeningForType(type));
       return {
@@ -327,6 +345,9 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       next.catalog.hardwareSets = mergeCatalogItems(next.catalog.hardwareSets, defaultCatalog.hardwareSets);
       next.catalog.panelTypes = mergeCatalogItems(next.catalog.panelTypes, defaultCatalog.panelTypes);
       next.componentLibrary ||= [];
+      next.customShapes = Array.isArray(next.customShapes)
+        ? next.customShapes.map(normalizeCustomShapeElement).filter(Boolean)
+        : [];
       next.viewOptions = {
         showOpenState: true,
         showProfileColor: true,
@@ -519,6 +540,12 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       win.room = valueOf("winRoom");
       const shapeType = valueOf("winShape");
       const currentPoints = win.shape?.type === "custom_polygon" ? win.shape.points : undefined;
+      const shouldOpenDiyEditor = shapeType === "custom_polygon" && win.shape?.type !== "custom_polygon" && !currentPoints?.length;
+      if (shouldOpenDiyEditor) {
+        setValue("winShape", win.shape?.type || "rectangular");
+        openDiyShapeEditor({ blank: true });
+        return;
+      }
       win.shape = normalizeWindowShape({
         type: shapeType,
         archHeightMm: Math.max(0, Number(valueOf("archHeight") || 0)),
@@ -853,6 +880,10 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     function applyShapePreset(type) {
       const win = currentWindow();
       if (!win) return;
+      if (type === "custom_polygon") {
+        openDiyShapeEditor({ blank: true });
+        return;
+      }
       win.shape = {
         ...normalizeWindowShape({
           type,
@@ -1484,6 +1515,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       setValue("archHeight", win.shape.archHeightMm || 0);
       setValue("shapePoints", formatShapePoints(win.shape.points || []));
       document.getElementById("shapePointsField")?.classList.toggle("hidden", win.shape.type !== "custom_polygon");
+      document.getElementById("btnOpenDiyShapeEditor")?.classList.toggle("hidden", win.shape.type !== "custom_polygon");
       document.getElementById("archHeight")?.closest("label")?.classList.toggle("hidden", win.shape.type !== "arched");
       renderSelect("seriesId", project.catalog.profileSystems.map(s => [s.id, `${s.id} · ${s.name}`]), win.seriesId);
       renderSelect("glassTypeId", project.catalog.glassTypes.map(g => [g.id, g.name]), win.defaultGlassTypeId);
@@ -2136,8 +2168,6 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           if (event.key === "Enter" || event.key === " ") select();
         });
       });
-      bindCustomShapePointHandles(svg, win, x, y, drawW, drawH);
-
       document.getElementById("drawingTitle").textContent = `${win.mark} · ${win.name || ""}`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${win.widthMm}×${win.heightMm} mm · ${win.layout.columns.length}列${win.layout.rows.length}行 · ${currentSeries(win).name}`;
     }
@@ -3503,49 +3533,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         const svgPoint = svgPoints[index];
         const labelVector = outwardLabelVector(svgPoint, centroid, 24);
         const angleDeg = polygonVertexAngle(prev, current, next);
-        parts.push(`<circle class="shape-vertex-dot" data-shape-point-index="${index}" cx="${svgPoint.x}" cy="${svgPoint.y}" r="5" tabindex="0" />`);
+        parts.push(`<circle class="shape-vertex-dot" cx="${svgPoint.x}" cy="${svgPoint.y}" r="3.5" />`);
         parts.push(`<text class="shape-angle-label" x="${svgPoint.x + labelVector.x}" y="${svgPoint.y + labelVector.y}">${Math.round(angleDeg)}°</text>`);
       }
       parts.push(`</g>`);
       return parts.join("");
-    }
-
-    function bindCustomShapePointHandles(svg, win, x, y, w, h) {
-      if (normalizeWindowShape(win.shape).type !== "custom_polygon") return;
-      svg.querySelectorAll("[data-shape-point-index]").forEach(handle => {
-        handle.addEventListener("pointerdown", event => {
-          event.preventDefault();
-          event.stopPropagation();
-          const index = Number(handle.dataset.shapePointIndex);
-          handle.setPointerCapture?.(event.pointerId);
-          handle.classList.add("dragging");
-          const move = moveEvent => {
-            moveEvent.preventDefault();
-            updateCustomShapePointFromPointer(svg, win, index, moveEvent, x, y, w, h);
-            render();
-          };
-          const up = upEvent => {
-            handle.releasePointerCapture?.(upEvent.pointerId);
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", up);
-            markDirty();
-          };
-          window.addEventListener("pointermove", move);
-          window.addEventListener("pointerup", up, { once: true });
-        });
-      });
-    }
-
-    function updateCustomShapePointFromPointer(svg, win, index, event, x, y, w, h) {
-      const point = svgPointFromClient(svg, event.clientX, event.clientY);
-      const points = normalizeShapePoints(win.shape.points);
-      if (!points[index]) return;
-      points[index] = {
-        x: Math.round(Math.min(100, Math.max(0, (point.x - x) / w * 100)) * 10) / 10,
-        y: Math.round(Math.min(100, Math.max(0, (point.y - y) / h * 100)) * 10) / 10
-      };
-      win.shape = normalizeWindowShape({ type: "custom_polygon", points });
-      setValue("shapePoints", formatShapePoints(win.shape.points));
     }
 
     function svgPointFromClient(svg, clientX, clientY) {
@@ -3553,6 +3545,151 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       point.x = clientX;
       point.y = clientY;
       return point.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    function openDiyShapeEditor(options = {}) {
+      const win = currentWindow();
+      if (!win) return;
+      const currentPoints = win.shape?.type === "custom_polygon" ? normalizeShapePoints(win.shape.points) : [];
+      diyShapeEditor.points = options.blank ? [] : currentPoints.map(point => ({ ...point }));
+      diyShapeEditor.selectedIndex = diyShapeEditor.points.length ? diyShapeEditor.points.length - 1 : -1;
+      diyShapeEditor.draggingIndex = -1;
+      renderDiyShapeEditor();
+      const dialog = document.getElementById("diyShapeDialog");
+      if (dialog?.showModal && !dialog.open) dialog.showModal();
+    }
+
+    function closeDiyShapeEditor() {
+      const dialog = document.getElementById("diyShapeDialog");
+      if (dialog?.open) dialog.close();
+      diyShapeEditor.draggingIndex = -1;
+    }
+
+    function renderDiyShapeEditor() {
+      const svg = document.getElementById("diyShapeCanvas");
+      const status = document.getElementById("diyShapeStatus");
+      if (!svg) return;
+      const bounds = diyShapeBounds();
+      const parts = [];
+      parts.push(`<rect class="diy-work-area" x="${bounds.x}" y="${bounds.y}" width="${bounds.w}" height="${bounds.h}" rx="2" />`);
+      for (let i = 1; i < 10; i += 1) {
+        const gx = bounds.x + bounds.w * i / 10;
+        const gy = bounds.y + bounds.h * i / 10;
+        parts.push(`<line class="diy-grid-line" x1="${gx}" y1="${bounds.y}" x2="${gx}" y2="${bounds.y + bounds.h}" />`);
+        parts.push(`<line class="diy-grid-line" x1="${bounds.x}" y1="${gy}" x2="${bounds.x + bounds.w}" y2="${gy}" />`);
+      }
+      const svgPoints = diyShapeEditor.points.map(point => diyPointToSvg(point, bounds));
+      if (svgPoints.length >= 3) {
+        const path = svgPoints.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
+        parts.push(`<path class="diy-shape-path" d="${path} Z" />`);
+      } else if (svgPoints.length >= 2) {
+        parts.push(`<polyline class="diy-shape-preview-line" points="${svgPoints.map(point => `${point.x},${point.y}`).join(" ")}" />`);
+      }
+      svgPoints.forEach((point, index) => {
+        const active = index === diyShapeEditor.selectedIndex ? " active" : "";
+        parts.push(`<circle class="diy-shape-point${active}" data-diy-point-index="${index}" cx="${point.x}" cy="${point.y}" r="7" />`);
+        parts.push(`<text class="diy-shape-label" x="${point.x}" y="${point.y - 13}">P${index + 1}</text>`);
+      });
+      if (!svgPoints.length) {
+        parts.push(`<text class="diy-shape-label" x="${bounds.x + bounds.w / 2}" y="${bounds.y + bounds.h / 2}">空白画布：点击添加外框顶点</text>`);
+      }
+      svg.innerHTML = parts.join("");
+      if (status) {
+        const count = diyShapeEditor.points.length;
+        status.textContent = count < 3
+          ? `已绘制 ${count} 个点，还需要至少 ${3 - count} 个点才能保存。`
+          : `已绘制 ${count} 个点，可继续拖动调整，或保存为窗型元素。`;
+      }
+    }
+
+    function diyShapeBounds() {
+      return { x: 58, y: 42, w: 604, h: 360 };
+    }
+
+    function diyPointToSvg(point, bounds = diyShapeBounds()) {
+      return {
+        x: bounds.x + point.x / 100 * bounds.w,
+        y: bounds.y + point.y / 100 * bounds.h
+      };
+    }
+
+    function diyPointFromSvg(point, bounds = diyShapeBounds()) {
+      return {
+        x: Math.round(Math.min(100, Math.max(0, (point.x - bounds.x) / bounds.w * 100)) * 10) / 10,
+        y: Math.round(Math.min(100, Math.max(0, (point.y - bounds.y) / bounds.h * 100)) * 10) / 10
+      };
+    }
+
+    function handleDiyShapePointerDown(event) {
+      const svg = document.getElementById("diyShapeCanvas");
+      if (!svg) return;
+      const index = Number(event.target?.dataset?.diyPointIndex);
+      const point = diyPointFromSvg(svgPointFromClient(svg, event.clientX, event.clientY));
+      if (Number.isInteger(index) && index >= 0) {
+        diyShapeEditor.selectedIndex = index;
+        diyShapeEditor.draggingIndex = index;
+      } else {
+        diyShapeEditor.points.push(point);
+        diyShapeEditor.selectedIndex = diyShapeEditor.points.length - 1;
+        diyShapeEditor.draggingIndex = diyShapeEditor.selectedIndex;
+      }
+      svg.setPointerCapture?.(event.pointerId);
+      renderDiyShapeEditor();
+    }
+
+    function handleDiyShapePointerMove(event) {
+      if (diyShapeEditor.draggingIndex < 0) return;
+      const svg = document.getElementById("diyShapeCanvas");
+      if (!svg) return;
+      diyShapeEditor.points[diyShapeEditor.draggingIndex] = diyPointFromSvg(svgPointFromClient(svg, event.clientX, event.clientY));
+      renderDiyShapeEditor();
+    }
+
+    function handleDiyShapePointerUp(event) {
+      const svg = document.getElementById("diyShapeCanvas");
+      svg?.releasePointerCapture?.(event.pointerId);
+      diyShapeEditor.draggingIndex = -1;
+    }
+
+    function undoDiyShapePoint() {
+      if (!diyShapeEditor.points.length) return;
+      const index = diyShapeEditor.selectedIndex >= 0 ? diyShapeEditor.selectedIndex : diyShapeEditor.points.length - 1;
+      diyShapeEditor.points.splice(index, 1);
+      diyShapeEditor.selectedIndex = Math.min(diyShapeEditor.points.length - 1, index - 1);
+      renderDiyShapeEditor();
+    }
+
+    function clearDiyShape() {
+      diyShapeEditor.points = [];
+      diyShapeEditor.selectedIndex = -1;
+      diyShapeEditor.draggingIndex = -1;
+      renderDiyShapeEditor();
+    }
+
+    function saveDiyShapeElement() {
+      const win = currentWindow();
+      if (!win) return;
+      const points = normalizeShapePoints(diyShapeEditor.points);
+      if (points.length < 3) {
+        showToast("DIY异形框至少需要3个点。");
+        return;
+      }
+      const shapeId = `DIY-${Date.now().toString(36).toUpperCase()}`;
+      win.shape = normalizeWindowShape({ type: "custom_polygon", points });
+      project.customShapes ||= [];
+      project.customShapes.push(normalizeCustomShapeElement({
+        shapeId,
+        name: `${win.mark || "当前窗"} DIY异形框`,
+        windowId: win.windowId,
+        points,
+        createdAt: new Date().toISOString()
+      }));
+      setValue("winShape", "custom_polygon");
+      setValue("shapePoints", formatShapePoints(points));
+      closeDiyShapeEditor();
+      switchInspector("window");
+      markDirty();
+      showToast("DIY异形框已保存为窗型元素。");
     }
 
     function outwardLabelVector(point, centroid, distance) {
@@ -5921,6 +6058,17 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       bindById("btnPlaceTop", "click", () => addAssemblyPlacement("top"));
       bindById("btnPlaceBottom", "click", () => addAssemblyPlacement("bottom"));
       bindById("btnPlaceFree", "click", () => addAssemblyPlacement("free"));
+      bindById("btnOpenDiyShapeEditor", "click", () => openDiyShapeEditor());
+      bindById("btnCloseDiyShape", "click", closeDiyShapeEditor);
+      bindById("btnUndoDiyPoint", "click", undoDiyShapePoint);
+      bindById("btnClearDiyShape", "click", clearDiyShape);
+      bindById("btnSaveDiyShape", "click", saveDiyShapeElement);
+      bindById("diyShapeCanvas", "pointerdown", handleDiyShapePointerDown);
+      bindById("diyShapeCanvas", "pointermove", handleDiyShapePointerMove);
+      bindById("diyShapeCanvas", "pointerup", handleDiyShapePointerUp);
+      bindById("diyShapeDialog", "click", event => {
+        if (event.target === event.currentTarget) closeDiyShapeEditor();
+      });
       bindById("btnConfigureSurround", "click", openInstallationInspector);
       bindById("btnAddCol", "click", () => splitSelectedColumn(2));
       bindById("btnAddRow", "click", () => splitSelectedRow(2));
