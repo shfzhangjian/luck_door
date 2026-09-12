@@ -133,6 +133,7 @@ assert.ok(schema.$defs.windowAssembly);
 assert.ok(schema.$defs.assemblyPlacement);
 
 const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
+const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf8");
 [
   "btnWindowDrawingMode",
   "btnAssemblyDrawingMode",
@@ -156,5 +157,6 @@ assert.ok(html.includes('id="diyShapeCanvas"'), "DIY polygon frames should provi
 assert.ok(html.includes('id="diyShapeName"'), "DIY polygon frames should require a user-provided saved element name");
 assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save the drawn model as a named shape element");
 assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames should appear in the drawing tool library");
+assert.ok(app.includes("data-edit-custom-shape"), "saved DIY polygon frames should expose a maintenance/edit action");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");

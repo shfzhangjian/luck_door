@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-38";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-38";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-39";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-39";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-38";
+} from "./openings.js?v=20260912-39";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-38";
+} from "./topology.js?v=20260912-39";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-38";
+} from "./joints.js?v=20260912-39";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-38";
+} from "./assemblies.js?v=20260912-39";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-38";
+} from "./installations.js?v=20260912-39";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -95,7 +95,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       points: [],
       selectedIndex: -1,
       draggingIndex: -1,
-      closed: false
+      closed: false,
+      editingShapeId: ""
     };
     let threeLib = null;
     let orbitControlsLib = null;
@@ -926,6 +927,29 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       switchInspector("cell");
       markDirty();
       showToast(`已将DIY异形构件“${item.name}”应用到选中窗格。`);
+    }
+
+    function editCustomShapeElement(shapeId) {
+      const item = project.customShapes?.find(shape => shape.shapeId === shapeId);
+      if (!item) return;
+      openDiyShapeEditor({
+        shapeId: item.shapeId,
+        name: item.name,
+        points: item.points
+      });
+    }
+
+    function updateCellsUsingCustomShape(shape) {
+      project.windows.forEach(win => {
+        win.layout.cells.forEach(cell => {
+          if (cell.customShape?.shapeId !== shape.shapeId) return;
+          cell.customShape = normalizeCellCustomShape({
+            shapeId: shape.shapeId,
+            name: shape.name,
+            points: shape.points
+          });
+        });
+      });
     }
 
     function addLocalMember(orientation) {
@@ -2019,10 +2043,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const container = document.getElementById("customShapeLibrary");
       if (!container) return;
       container.innerHTML = (project.customShapes || []).map(shape => `
-        <button class="custom-shape-item" data-custom-shape="${escapeHtml(shape.shapeId)}" title="${escapeHtml(shape.name)}">
-          ${renderCustomShapeThumb(shape.points)}
-          <strong>${escapeHtml(shape.name)}</strong>
-        </button>
+        <div class="custom-shape-item" title="${escapeHtml(shape.name)}">
+          <button class="custom-shape-apply" data-custom-shape="${escapeHtml(shape.shapeId)}" type="button">
+            ${renderCustomShapeThumb(shape.points)}
+            <strong>${escapeHtml(shape.name)}</strong>
+          </button>
+          <button class="custom-shape-edit" data-edit-custom-shape="${escapeHtml(shape.shapeId)}" type="button">编辑</button>
+        </div>
       `).join("");
     }
 
@@ -3715,8 +3742,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       diyShapeEditor.points = Array.isArray(options.points) ? normalizeShapePoints(options.points).map(point => ({ ...point })) : [];
       diyShapeEditor.selectedIndex = -1;
       diyShapeEditor.draggingIndex = -1;
-      diyShapeEditor.closed = false;
-      setValue("diyShapeName", "");
+      diyShapeEditor.closed = diyShapeEditor.points.length >= 3 && !options.blank;
+      diyShapeEditor.editingShapeId = String(options.shapeId || "");
+      setValue("diyShapeName", options.name || "");
+      const title = document.getElementById("diyShapeDialogTitle");
+      if (title) title.textContent = diyShapeEditor.editingShapeId ? "编辑DIY异形构件" : "DIY异形框绘制";
+      const saveButton = document.getElementById("btnSaveDiyShape");
+      if (saveButton) saveButton.textContent = diyShapeEditor.editingShapeId ? "保存修改" : "保存为窗型元素";
       renderDiyShapeEditor();
       const dialog = document.getElementById("diyShapeDialog");
       if (dialog?.showModal && !dialog.open) dialog.showModal();
@@ -3903,17 +3935,25 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         document.getElementById("diyShapeName")?.focus();
         return;
       }
-      const shapeId = `DIY-${Date.now().toString(36).toUpperCase()}`;
       project.customShapes ||= [];
-      project.customShapes.push(normalizeCustomShapeElement({
+      const editingIndex = project.customShapes.findIndex(shape => shape.shapeId === diyShapeEditor.editingShapeId);
+      const shapeId = editingIndex >= 0 ? project.customShapes[editingIndex].shapeId : `DIY-${Date.now().toString(36).toUpperCase()}`;
+      const savedShape = normalizeCustomShapeElement({
+        ...project.customShapes[editingIndex],
         shapeId,
         name,
         points,
         createdAt: new Date().toISOString()
-      }));
+      });
+      if (editingIndex >= 0) {
+        project.customShapes[editingIndex] = savedShape;
+        updateCellsUsingCustomShape(savedShape);
+      } else {
+        project.customShapes.push(savedShape);
+      }
       closeDiyShapeEditor();
       markDirty();
-      showToast(`DIY窗型“${name}”已保存到工具库。`);
+      showToast(editingIndex >= 0 ? `DIY异形构件“${name}”已更新。` : `DIY窗型“${name}”已保存到工具库。`);
     }
 
     function outwardLabelVector(point, centroid, distance) {
@@ -4306,7 +4346,10 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       frameMount.userData.mountType = "window-frame";
       wallHost.add(frameMount);
 
-      if (showOpening) addShowroomOpening(wallHost, width, height, face, depth, mats, win, scale, cornerMount, showOrientationLabels);
+      if (showOpening) {
+        addShowroomOpening(wallHost, width, height, face, depth, mats, win, scale, cornerMount, showOrientationLabels);
+        addThreeCustomCellWallOpenings(wallHost, win, colEdges, rowEdges, face, depth, mats, scale, cornerMount);
+      }
       addMountedOuterFrame(frameMount, win, width, height, face, depth, mats, cornerMount);
       for (let c = 1; c < colEdges.length - 1; c += 1) {
         addBox(frameMount, colEdges[c], 0, 0.01, face * 0.82, innerH, depth * 0.92, mats.profile);
@@ -5253,6 +5296,48 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       mesh.userData.mountType = "shaped-wall-opening";
       parent.add(mesh);
       return mesh;
+    }
+
+    function addThreeCustomCellWallOpenings(parent, win, colEdges, rowEdges, face, depth, mats, scale, cornerMount) {
+      if (cornerMount) return;
+      const customCells = win.layout.cells
+        .map((cell, index) => ({ cell, index }))
+        .filter(item => normalizeCellCustomShape(item.cell?.customShape));
+      if (!customCells.length) return;
+      const installation = normalizeSurround(win.installation?.surround);
+      const section = resolveInstallationSection(installation, depth / scale);
+      const wallDepth = Math.max(0.06, installation.wallThicknessMm * scale);
+      const wallCenterZ = section.wallCenterMm * scale;
+      const cols = win.layout.columns.length;
+      const rows = win.layout.rows.length;
+      const pad = Math.max(face * 0.38, wallDepth * 0.08);
+      customCells.forEach(({ cell, index }) => {
+        const shape = normalizeCellCustomShape(cell.customShape);
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+        const left = colEdges[col] + face * 0.11;
+        const right = colEdges[col + 1] - face * 0.11;
+        const bottom = rowEdges[rows - row - 1] + face * 0.11;
+        const top = rowEdges[rows - row] - face * 0.11;
+        if (right - left <= face || top - bottom <= face) return;
+        const openingPoints = shape.points.map(point => ({
+          x: left + point.x / 100 * (right - left),
+          y: top - point.y / 100 * (top - bottom)
+        }));
+        addThreeWallPanelWithOpening(
+          parent,
+          openingPoints,
+          {
+            left: left - pad,
+            right: right + pad,
+            bottom: bottom - pad,
+            top: top + pad
+          },
+          wallDepth,
+          wallCenterZ,
+          mats.wall
+        );
+      });
     }
 
     function addCornerReturnWall(parent, cornerMount, height, sillHeight, face, depth, wallBand, wallDepth, wallCenterZ, mats) {
@@ -6473,6 +6558,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         btn.addEventListener("click", () => applyShapePreset(btn.dataset.shapePreset));
       });
       bindById("customShapeLibrary", "click", event => {
+        const editButton = event.target.closest("[data-edit-custom-shape]");
+        if (editButton) {
+          editCustomShapeElement(editButton.dataset.editCustomShape);
+          return;
+        }
         const button = event.target.closest("[data-custom-shape]");
         if (button) applyCustomShapeElement(button.dataset.customShape);
       });
