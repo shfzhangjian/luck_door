@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doormes.local/schemas/door-window-design.v1.schema.json",
+  "title": "朗科门窗设计大师设计JSON",
+  "description": "中国门窗可视化设计平台第一阶段设计数据格式。该格式是绘图、算料、BOM和外部接口的统一输入。",
+  "type": "object",
+  "required": ["schemaVersion", "project", "order", "catalog", "windows"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "cn-door-window-design.v1"
+    },
+    "project": {
+      "type": "object",
+      "required": ["projectId", "name"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "customerName": { "type": "string" },
+        "address": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "order": {
+      "type": "object",
+      "required": ["orderId"],
+      "properties": {
+        "orderId": { "type": "string" },
+        "batchNo": { "type": "string" },
+        "source": { "type": "string" },
+        "externalOrderId": { "type": "string" },
+        "productionAllowed": { "type": "boolean" },
+        "shipmentAllowed": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["profileSystems", "glassTypes", "hardwareSets", "panelTypes"],
+      "properties": {
+        "profileSystems": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileSystem" }
+        },
+        "glassTypes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/glassType" }
+        },
+        "hardwareSets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/hardwareSet" }
+        },
+        "panelTypes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/panelType" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "componentLibrary": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/componentTemplate" }
+    },
+    "viewOptions": { "$ref": "#/$defs/viewOptions" },
+    "calculation": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["draft", "calculated", "confirmed", "frozen", "changed"]
+        },
+        "mbomVersion": { "type": "integer", "minimum": 0 },
+        "lastCalculatedAt": { "type": "string" },
+        "confirmedAt": { "type": "string" },
+        "frozenAt": { "type": "string" },
+        "lastHash": { "type": "string" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/integrationEvent" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "integrations": {
+      "type": "object",
+      "properties": {
+        "reservedEvents": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "externalRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "system": { "type": "string" },
+              "type": { "type": "string" },
+              "id": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/windowDesign" }
+    }
+  },
+  "$defs": {
+    "profileSystem": {
+      "type": "object",
+      "required": ["id", "name", "material", "frameProfile", "sashProfile", "mullionProfile"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "material": {
+          "type": "string",
+          "enum": ["aluminum", "pvc", "wood", "wood_aluminum", "steel"]
+        },
+        "frameProfile": { "type": "string" },
+        "sashProfile": { "type": "string" },
+        "mullionProfile": { "type": "string" },
+        "beadProfile": { "type": "string" },
+        "gasketCode": { "type": "string" },
+        "faceWidthMm": { "type": "number", "minimum": 1 },
+        "sashFaceWidthMm": { "type": "number", "minimum": 1 },
+        "stockLengthMm": { "type": "number", "minimum": 1 },
+        "sawKerfMm": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "glassType": {
+      "type": "object",
+      "required": ["id", "name", "thicknessMm"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "thicknessMm": { "type": "number", "minimum": 1 },
+        "ug": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "hardwareSet": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "handleCode": { "type": "string" },
+        "hingeCode": { "type": "string" },
+        "memberName": { "type": "string" },
+        "hingeQtyRule": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "panelType": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "thicknessMm": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "componentTemplate": {
+      "type": "object",
+      "required": ["id", "name", "window"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "source": { "type": "string" },
+        "window": { "$ref": "#/$defs/windowTemplate" }
+      },
+      "additionalProperties": true
+    },
+    "windowTemplate": {
+      "type": "object",
+      "required": ["layout"],
+      "properties": {
+        "widthMm": { "type": "number", "minimum": 300 },
+        "heightMm": { "type": "number", "minimum": 300 },
+        "installation": { "$ref": "#/$defs/installation" },
+        "shape": { "$ref": "#/$defs/shape" },
+        "layout": { "$ref": "#/$defs/layoutGrid" },
+        "seriesId": { "type": "string" },
+        "colorInside": { "type": "string" },
+        "colorOutside": { "type": "string" },
+        "defaultGlassTypeId": { "type": "string" },
+        "defaultHardwareSetId": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "windowDesign": {
+      "type": "object",
+      "required": ["windowId", "mark", "quantity", "widthMm", "heightMm", "seriesId", "layout"],
+      "properties": {
+        "windowId": { "type": "string" },
+        "mark": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "integer", "minimum": 1 },
+        "widthMm": { "type": "number", "minimum": 300 },
+        "heightMm": { "type": "number", "minimum": 300 },
+        "floor": { "type": "string" },
+        "room": { "type": "string" },
+        "seriesId": { "type": "string" },
+        "colorInside": { "type": "string" },
+        "colorOutside": { "type": "string" },
+        "defaultGlassTypeId": { "type": "string" },
+        "defaultHardwareSetId": { "type": "string" },
+        "installation": { "$ref": "#/$defs/installation" },
+        "shape": { "$ref": "#/$defs/shape" },
+        "layout": { "$ref": "#/$defs/layoutGrid" },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "shape": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["rectangular", "arched", "trapezoid", "round", "polygon"]
+        },
+        "archHeightMm": { "type": "number", "minimum": 0 },
+        "polygonPoints": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [{ "type": "number" }, { "type": "number" }],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "installation": {
+      "type": "object",
+      "properties": {
+        "sillHeightMm": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "viewOptions": {
+      "type": "object",
+      "description": "仅控制设计图显示，不参与算料和BOM计算。",
+      "properties": {
+        "showOpenState": { "type": "boolean" },
+        "showProfileColor": { "type": "boolean" },
+        "showDimensions": { "type": "boolean" },
+        "showPlanView": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "layoutGrid": {
+      "type": "object",
+      "required": ["columns", "rows", "cells"],
+      "properties": {
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "cells": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/cell" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "cell": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["fixed_glass", "turn", "turn_tilt", "top_hung", "bottom_hung", "sliding", "lift_slide", "psk", "parallel_slide", "parallel_project", "pocket_slide", "corner_slide", "vertical_slide", "folding", "door", "screen", "louver", "grille", "panel", "empty"]
+        },
+        "opening": {
+          "type": "string",
+          "description": "构件开启方向稳定编码；固定构件使用 fixed。",
+          "enum": ["fixed", "left_in", "right_in", "left_out", "right_out", "top_in", "top_out", "bottom_in", "bottom_out", "slide_left", "slide_right", "lift_slide_left", "lift_slide_right", "psk_left", "psk_right", "parallel_slide_left", "parallel_slide_right", "parallel_out", "pocket_left", "pocket_right", "pocket_both", "corner_left", "corner_right", "corner_both", "slide_up", "slide_down", "fold_left", "fold_right"]
+        },
+        "openingAssembly": { "$ref": "#/$defs/openingAssembly" },
+        "glassTypeId": { "type": "string" },
+        "hardwareSetId": { "type": "string" },
+        "panelTypeId": { "type": "string" },
+        "handleHeightMm": { "type": "number", "minimum": 0 },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "openingAssembly": {
+      "type": "object",
+      "description": "组合开启构件的生产语义。opening描述基本方向，本对象描述扇数、活动扇、轨道、主从顺序、收口和配套纱窗。",
+      "required": ["mechanism", "panelCount", "activePanelCount", "trackCount", "stackSide", "primarySide", "openPlane", "panels", "operationSequence"],
+      "properties": {
+        "mechanism": {
+          "type": "string",
+          "enum": ["fixed", "side_hung", "tilt_turn", "top_hung", "bottom_hung", "inline_slide", "lift_slide", "psk_tilt_slide", "parallel_slide", "parallel_project", "pocket_slide", "corner_slide", "vertical_slide", "folding"]
+        },
+        "panelCount": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "activePanelCount": { "type": "integer", "minimum": 0, "maximum": 12 },
+        "trackCount": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "stackSide": {
+          "type": "string",
+          "enum": ["none", "left", "right", "both", "top", "bottom"]
+        },
+        "primarySide": {
+          "type": "string",
+          "enum": ["left", "right"]
+        },
+        "mullionMode": {
+          "type": "string",
+          "enum": ["fixed_mullion", "flying_mullion"]
+        },
+        "openPlane": {
+          "type": "string",
+          "enum": ["in", "out"]
+        },
+        "operationPriority": {
+          "type": "string",
+          "enum": ["turn_first", "tilt_first", "slide_first"]
+        },
+        "ventilationMode": {
+          "type": "string",
+          "enum": ["none", "tilt", "micro", "night"]
+        },
+        "trafficDoor": {
+          "type": "string",
+          "enum": ["none", "left", "right"]
+        },
+        "screenMode": {
+          "type": "string",
+          "enum": ["none", "fixed", "swing", "sliding", "retractable"]
+        },
+        "cornerAngleDeg": { "type": "number", "minimum": 60, "maximum": 180 },
+        "cornerPostMode": {
+          "type": "string",
+          "enum": ["post", "postless"]
+        },
+        "pocketDepthMm": { "type": "integer", "minimum": 0, "maximum": 4000 },
+        "panels": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/openingPanel" }
+        },
+        "operationSequence": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "openingPanel": {
+      "type": "object",
+      "required": ["id", "label", "role", "movable", "hingeSide", "trackIndex", "operationOrder"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "role": {
+          "type": "string",
+          "enum": ["primary", "secondary", "fixed"]
+        },
+        "movable": { "type": "boolean" },
+        "hingeSide": {
+          "type": "string",
+          "enum": ["left", "right"]
+        },
+        "trackIndex": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "operationOrder": { "type": "integer", "minimum": -1, "maximum": 11 }
+      },
+      "additionalProperties": true
+    },
+    "integrationEvent": {
+      "type": "object",
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "type": "string" },
+        "at": { "type": "string" },
+        "mbomVersion": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

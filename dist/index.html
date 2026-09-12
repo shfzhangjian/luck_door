@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>朗科门窗设计大师</title>
+  <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-27" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./assets/vendor/three/three.module.min.js",
+        "three/addons/": "./assets/vendor/three/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">朗</div>
+        <div>
+          <h1>朗科门窗设计大师</h1>
+          <span>中国门窗设计 · 3D预览 · 算料 · BOM</span>
+        </div>
+      </div>
+      <nav class="module-nav" aria-label="工作模块">
+        <button class="module-button active" data-module="draw">设计</button>
+        <button class="module-button" data-module="preview">3D预览</button>
+        <button class="module-button" data-module="bom">算料/BOM</button>
+      </nav>
+      <div class="top-actions">
+        <span class="status-pill"><span class="dot ok"></span>已自动保存</span>
+        <button id="btnExportJsonTop">导出设计</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="panel left">
+        <div class="tabs" role="tablist" aria-label="配置">
+          <button class="left-tab active" data-tab="draw">工具</button>
+          <button class="left-tab" data-tab="components">窗型</button>
+          <button class="left-tab" data-tab="product">产品</button>
+          <button class="left-tab" data-tab="order">项目</button>
+          <button class="left-tab" data-tab="json">数据</button>
+        </div>
+
+        <div id="left-draw" class="left-pane">
+          <div class="tool-library-head">
+            <div>
+              <h2>绘图工具</h2>
+              <span>先选窗格，再应用构件或绘图命令</span>
+            </div>
+            <input id="toolSearch" type="search" placeholder="搜索框、梃、开启方式" aria-label="搜索绘图工具" />
+          </div>
+          <div id="toolLibrary" class="tool-library">
+            <section class="tool-section" data-tool-group="常用 固定玻璃 平开 内倒 推拉">
+              <div class="tool-section-head"><h3>常用</h3><span>高频构件</span></div>
+              <div class="palette-grid compact">
+                <button class="palette-tile active" data-cell-preset="fixed_glass"><span>□</span><strong>固定玻璃</strong></button>
+                <button class="palette-tile" data-cell-preset="turn"><span>↗</span><strong>平开扇</strong></button>
+                <button class="palette-tile" data-cell-preset="turn_tilt"><span>⌁</span><strong>内开内倒</strong></button>
+                <button class="palette-tile" data-cell-preset="sliding"><span>⇄</span><strong>推拉扇</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="画框 四边框 上拱框 斜顶框">
+              <div class="tool-section-head"><h3>框</h3><span>整窗外形</span></div>
+              <div class="palette-grid compact">
+                <button class="palette-tile" data-shape-preset="rectangular"><span>□</span><strong>四边框</strong></button>
+                <button class="palette-tile" data-shape-preset="arched"><span>⌒</span><strong>上拱框</strong></button>
+                <button class="palette-tile" data-shape-preset="trapezoid"><span>⌿</span><strong>斜顶框</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="中梃 竖梃 横梃 局部梃 等分 分格">
+              <div class="tool-section-head"><h3>梃与分格</h3><span>结构命令</span></div>
+              <div class="palette-grid compact">
+                <button id="btnAddCol" class="palette-tile"><span>┃</span><strong>贯通竖梃</strong></button>
+                <button id="btnAddRow" class="palette-tile"><span>━</span><strong>贯通横梃</strong></button>
+                <button id="btnAddLocalVertical" class="palette-tile"><span>┆</span><strong>局部竖梃</strong></button>
+                <button id="btnAddLocalHorizontal" class="palette-tile"><span>┄</span><strong>局部横梃</strong></button>
+                <button id="btnSplitVertical" class="palette-tile"><span>1│2│1</span><strong>三分竖格</strong></button>
+                <button id="btnSplitHorizontal" class="palette-tile"><span>1<br>―<br>2</span><strong>三分横格</strong></button>
+                <button id="btnEqualizeGrid" class="palette-tile"><span>＝</span><strong>均分尺寸</strong></button>
+                <button id="btnRemoveCol" class="palette-tile danger-tool"><span>−┃</span><strong>删除末列</strong></button>
+                <button id="btnRemoveRow" class="palette-tile danger-tool"><span>−━</span><strong>删除末行</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="连接节点 拼接料 转角料 正装 反装 万能转角">
+              <div class="tool-section-head"><h3>连接节点</h3><span>工程构件</span></div>
+              <div class="palette-grid compact">
+                <button id="btnAddSpliceJoint" class="palette-tile"><span>Ⅱ</span><strong>拼接料</strong></button>
+                <button id="btnAddCornerJoint" class="palette-tile"><span>∟</span><strong>转角料</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="多窗组合 装配 左右 上下 自由定位">
+              <div class="tool-section-head"><h3>多窗组合</h3><span>装配定位</span></div>
+              <div class="palette-grid compact">
+                <button id="btnNewAssembly" class="palette-tile"><span>⊞</span><strong>新建组合</strong></button>
+                <button id="btnPlaceLeft" class="palette-tile"><span>←</span><strong>左侧组合</strong></button>
+                <button id="btnPlaceRight" class="palette-tile"><span>→</span><strong>右侧组合</strong></button>
+                <button id="btnPlaceTop" class="palette-tile"><span>↑</span><strong>上方组合</strong></button>
+                <button id="btnPlaceBottom" class="palette-tile"><span>↓</span><strong>下方组合</strong></button>
+                <button id="btnPlaceFree" class="palette-tile"><span>✥</span><strong>自由定位</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="安装 包套 洞口 墙体 衬板 收口">
+              <div class="tool-section-head"><h3>安装与包套</h3><span>洞口节点</span></div>
+              <div class="palette-grid compact">
+                <button id="btnConfigureSurround" class="palette-tile"><span>▤</span><strong>包套设计</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="开启扇 平开 内开内倒 上悬 下悬 门扇 双扇">
+              <div class="tool-section-head"><h3>开启扇</h3><span>平开与悬窗</span></div>
+              <div class="palette-grid compact">
+                <button class="palette-tile" data-cell-preset="turn"><span>↗</span><strong>平开扇</strong></button>
+                <button class="palette-tile" data-cell-preset="turn_tilt"><span>⌁</span><strong>内开内倒</strong></button>
+                <button class="palette-tile" data-cell-preset="top_hung"><span>↑</span><strong>上悬窗</strong></button>
+                <button class="palette-tile" data-cell-preset="bottom_hung"><span>↓</span><strong>下悬窗</strong></button>
+                <button class="palette-tile" data-cell-preset="door"><span>▯</span><strong>门扇</strong></button>
+                <button id="btnQuickPair" class="palette-tile"><span>◇◇</span><strong>双扇平开</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="推拉 折叠 提升 PSK 平行 入墙 转角 上下提拉">
+              <div class="tool-section-head"><h3>推拉与折叠</h3><span>组合开启</span></div>
+              <div class="palette-grid compact">
+                <button class="palette-tile" data-cell-preset="sliding"><span>⇄</span><strong>普通推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="lift_slide"><span>⇧</span><strong>提升推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="psk"><span>⇲</span><strong>PSK平移内倒</strong></button>
+                <button class="palette-tile" data-cell-preset="parallel_slide"><span>⇥</span><strong>平行推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="parallel_project"><span>⊙</span><strong>平行推出</strong></button>
+                <button class="palette-tile" data-cell-preset="pocket_slide"><span>⇤</span><strong>入墙推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="corner_slide"><span>⌞</span><strong>转角推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="vertical_slide"><span>↕</span><strong>上下提拉</strong></button>
+                <button class="palette-tile" data-cell-preset="folding"><span>⋘</span><strong>折叠窗</strong></button>
+              </div>
+            </section>
+
+            <section class="tool-section" data-tool-group="格条 纱窗 百叶 面板 留空 辅件">
+              <div class="tool-section-head"><h3>格条与辅件</h3><span>填充构件</span></div>
+              <div class="palette-grid compact">
+                <button class="palette-tile" data-cell-preset="grille"><span>╬</span><strong>格条</strong></button>
+                <button class="palette-tile" data-cell-preset="screen"><span>╳</span><strong>纱窗</strong></button>
+                <button class="palette-tile" data-cell-preset="louver"><span>≋</span><strong>百叶</strong></button>
+                <button class="palette-tile" data-cell-preset="panel"><span>▣</span><strong>面板</strong></button>
+                <button class="palette-tile" data-cell-preset="empty"><span>—</span><strong>留空</strong></button>
+              </div>
+            </section>
+            <div id="toolSearchEmpty" class="tool-search-empty hidden">没有匹配的绘图工具</div>
+          </div>
+        </div>
+
+        <div id="left-order" class="left-pane hidden">
+          <section class="section">
+            <h2>项目信息</h2>
+            <div class="form-grid">
+              <label>项目编号<input id="projectId" /></label>
+              <label>项目名称<input id="projectName" /></label>
+              <label>客户<input id="customerName" /></label>
+              <label>地址<input id="projectAddress" /></label>
+              <label>销售单号<input id="orderId" /></label>
+              <label>生产批次<input id="batchNo" /></label>
+            </div>
+          </section>
+
+        </div>
+
+        <div id="left-product" class="left-pane hidden">
+          <section class="section">
+            <h2>产品材料</h2>
+            <div class="form-grid one">
+              <label>产品系列<select id="seriesId"></select></label>
+              <label>内色<input id="colorInside" /></label>
+              <label>外色<input id="colorOutside" /></label>
+              <label>默认玻璃<select id="glassTypeId"></select></label>
+              <label>默认五金<select id="hardwareSetId"></select></label>
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>新增材料包</h2>
+            <div class="form-grid">
+              <label>系列ID<input id="newSeriesId" placeholder="AL80" /></label>
+              <label>名称<input id="newSeriesName" placeholder="80断桥系统窗" /></label>
+              <label>材质
+                <select id="newMaterial">
+                  <option value="aluminum">铝合金</option>
+                  <option value="pvc">塑钢</option>
+                  <option value="wood">木窗</option>
+                </select>
+              </label>
+              <label>框料编码<input id="newFrameCode" placeholder="AL80-K01" /></label>
+              <label>扇料编码<input id="newSashCode" placeholder="AL80-S01" /></label>
+              <label>中梃编码<input id="newMullionCode" placeholder="AL80-Z01" /></label>
+              <label>拼接料编码<input id="newSpliceCode" placeholder="AL80-SPLICE" /></label>
+              <label>转角料编码<input id="newCornerCode" placeholder="AL80-CORNER-90" /></label>
+              <label>面宽 mm<input id="newFaceWidth" type="number" value="70" /></label>
+              <label>框深 mm<input id="newFrameDepth" type="number" value="70" /></label>
+              <label>标准料长 mm<input id="newStockLength" type="number" value="6000" /></label>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+              <button id="btnAddSeries" class="primary">加入材料库</button>
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>当前系列</h2>
+            <ul id="seriesDetails" class="mini-list"></ul>
+          </section>
+        </div>
+
+        <div id="left-components" class="left-pane hidden">
+          <section class="section">
+            <h2>门窗组件</h2>
+            <div class="row">
+              <button id="btnSaveComponent" class="primary">保存当前窗型</button>
+              <button id="btnClearCustom" class="danger">清空自定义</button>
+            </div>
+          </section>
+          <section class="section">
+            <div id="templateList" class="template-list"></div>
+          </section>
+        </div>
+
+        <div id="left-json" class="left-pane hidden">
+          <section class="section">
+            <h2>设计JSON</h2>
+            <div class="stack">
+              <textarea id="jsonText" spellcheck="false"></textarea>
+              <div class="row">
+                <button id="btnApplyJson" class="primary">应用JSON</button>
+                <button id="btnExportJson">导出JSON</button>
+                <button id="btnImportJson">导入JSON</button>
+                <input id="importFile" type="file" accept="application/json,.json" class="hidden" />
+              </div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="warning">JSON 是平台主数据：界面绘制、算料、BOM 和未来接口都从同一份设计模型生成。</div>
+          </section>
+        </div>
+      </aside>
+
+      <section class="design">
+        <div class="design-toolbar">
+          <div class="toolbar-group" aria-label="门窗文件">
+            <button id="btnNewWindow" class="primary">新建门窗</button>
+            <button id="btnDuplicateWindow">复制</button>
+            <button id="btnDeleteWindow" class="danger">删除</button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <div class="drawing-mode-switch" role="group" aria-label="绘图视图">
+            <button id="btnWindowDrawingMode" class="active" aria-pressed="true">单窗</button>
+            <button id="btnAssemblyDrawingMode" aria-pressed="false">组合</button>
+          </div>
+          <span id="selectionModeLabel" class="toolbar-context">选择模式 · 窗格</span>
+        </div>
+
+        <div class="canvas-wrap">
+          <div class="canvas-stage">
+          <div class="drawing-board">
+            <div class="drawing-meta">
+              <span id="drawingTitle"></span>
+              <span id="drawingStats"></span>
+            </div>
+            <div class="canvas-shell">
+              <svg id="windowSvg" class="window-canvas" viewBox="0 0 900 760" role="img" aria-label="门窗绘制画布"></svg>
+              <div class="drawing-view-options" role="group" aria-label="图纸显示选项">
+                <label><input id="viewShowOpenState" type="checkbox" />开启状态</label>
+                <label><input id="viewShowProfileColor" type="checkbox" />型材颜色</label>
+                <label><input id="viewShowDimensions" type="checkbox" />全部标尺</label>
+                <label><input id="viewShowPlanView" type="checkbox" />俯视图</label>
+              </div>
+            </div>
+          </div>
+
+          </div>
+        </div>
+
+        <div class="window-strip">
+          <div id="windowCards" class="window-cards"></div>
+        </div>
+      </section>
+
+      <aside class="panel right inspector-panel">
+        <div class="tabs" role="tablist" aria-label="属性">
+          <button class="inspector-tab active" data-inspector="window">整窗属性</button>
+          <button class="inspector-tab" data-inspector="cell">选中构件</button>
+          <button class="inspector-tab" data-inspector="installation">安装/包套</button>
+          <button class="inspector-tab hidden" data-inspector="member">局部梃</button>
+          <button class="inspector-tab hidden" data-inspector="joint">连接节点</button>
+          <button class="inspector-tab hidden" data-inspector="assembly">装配属性</button>
+        </div>
+
+        <div id="inspector-window" class="inspector-pane">
+          <section class="section">
+            <h2>当前门窗</h2>
+            <div class="form-grid">
+              <label>窗号<input id="winMark" /></label>
+              <label>数量<input id="winQty" type="number" min="1" step="1" /></label>
+              <label>宽度 mm<input id="winWidth" type="number" min="300" step="10" /></label>
+              <label>高度 mm<input id="winHeight" type="number" min="300" step="10" /></label>
+              <label>台高 mm<input id="sillHeight" type="number" min="0" step="10" /></label>
+              <label>楼层<input id="winFloor" /></label>
+              <label>房间<input id="winRoom" /></label>
+              <label>外形
+                <select id="winShape">
+                  <option value="rectangular">矩形</option>
+                  <option value="arched">上拱</option>
+                  <option value="trapezoid">斜顶</option>
+                </select>
+              </label>
+              <label>上拱高度 mm<input id="archHeight" type="number" min="0" step="10" /></label>
+            </div>
+          </section>
+          <section class="section inspector-summary">
+            <h2>产品摘要</h2>
+            <ul id="inspectorProductSummary" class="mini-list"></ul>
+          </section>
+        </div>
+
+        <div id="inspector-installation" class="inspector-pane hidden">
+          <section class="section">
+            <div class="inspector-object-head">
+              <div>
+                <h2>安装与包套</h2>
+                <span id="installationWindowLabel">当前门窗</span>
+              </div>
+              <label class="compact-toggle"><input id="surroundEnabled" type="checkbox" />启用包套</label>
+            </div>
+            <div class="installation-detail-wrap">
+              <svg id="installationDetailPreview" viewBox="0 0 280 180" role="img" aria-label="包套安装截面预览"></svg>
+            </div>
+            <div class="form-grid one">
+              <label>安装方式
+                <select id="installationMountingMode">
+                  <option value="opening">洞口内安装</option>
+                  <option value="exterior_overmount">外墙外挂安装</option>
+                </select>
+              </label>
+              <label id="installationFrameAlignmentField">洞口内框位
+                <select id="installationFrameAlignment">
+                  <option value="center">墙厚居中</option>
+                  <option value="exterior_flush">外口齐平</option>
+                  <option value="interior_flush">内口齐平</option>
+                  <option value="custom">自定义框位</option>
+                </select>
+              </label>
+              <label>包套样式
+                <select id="surroundStyle">
+                  <option value="both_sides">内外双包套</option>
+                  <option value="outside_only">仅外包套</option>
+                  <option value="inside_only">仅内包套</option>
+                  <option value="liner">洞口衬板</option>
+                </select>
+              </label>
+              <label>应用边
+                <select id="surroundEdgeMode">
+                  <option value="all">四边</option>
+                  <option value="three_without_bottom">三边无底</option>
+                  <option value="left_top">左边与上边</option>
+                  <option value="right_top">右边与上边</option>
+                  <option value="custom">自定义边</option>
+                </select>
+              </label>
+              <div id="surroundCustomSides" class="surround-side-grid hidden" aria-label="自定义应用边">
+                <label><input id="surroundSideTop" type="checkbox" />上边</label>
+                <label><input id="surroundSideRight" type="checkbox" />右边</label>
+                <label><input id="surroundSideBottom" type="checkbox" />下边</label>
+                <label><input id="surroundSideLeft" type="checkbox" />左边</label>
+              </div>
+              <div class="member-range-row">
+                <label>墙厚 mm<input id="surroundWallThickness" type="number" min="60" max="600" step="1" /></label>
+                <label id="surroundFrameOffsetField">自定义框位偏移 mm（+向室内）<input id="surroundFrameOffset" type="number" min="-300" max="300" step="1" /></label>
+              </div>
+              <label>墙体材质
+                <select id="wallMaterial">
+                  <option value="plaster">白色抹灰</option>
+                  <option value="concrete">清水混凝土</option>
+                  <option value="red_brick">红砖墙</option>
+                  <option value="gray_brick">灰砖墙</option>
+                  <option value="stone">石材墙面</option>
+                </select>
+              </label>
+              <div class="member-range-row">
+                <label>转角墙节点
+                  <select id="wallCornerMode">
+                    <option value="structural_pier">结构转角墙柱</option>
+                    <option value="open_corner">连续转角洞口</option>
+                  </select>
+                </label>
+                <label id="cornerPierWidthField">墙柱宽度 mm<input id="cornerPierWidth" type="number" min="120" max="1200" step="10" /></label>
+              </div>
+              <label id="exteriorMountGapField" class="hidden">外挂离墙间隙 mm<input id="exteriorMountGap" type="number" min="0" max="200" step="1" /></label>
+              <div class="member-range-row">
+                <label>外包边宽 mm<input id="surroundOutsideWidth" type="number" min="0" max="500" step="1" /></label>
+                <label>内包边宽 mm<input id="surroundInsideWidth" type="number" min="0" max="500" step="1" /></label>
+              </div>
+              <label>板材厚度 mm<input id="surroundBoardThickness" type="number" min="5" max="100" step="1" /></label>
+              <label>材料编码<input id="surroundMaterialCode" /></label>
+              <div class="member-range-row">
+                <label>外侧颜色<input id="surroundColorOutside" /></label>
+                <label>内侧颜色<input id="surroundColorInside" /></label>
+              </div>
+              <label>备注<input id="surroundNote" /></label>
+            </div>
+          </section>
+          <section class="section topology-summary">
+            <h2>安装摘要</h2>
+            <ul id="installationSummary" class="mini-list"></ul>
+          </section>
+        </div>
+
+        <div id="inspector-cell" class="inspector-pane hidden">
+          <section class="section">
+            <h2>选中构件</h2>
+            <div class="form-grid one">
+              <label>构件类型
+                <select id="cellType">
+                  <option value="fixed_glass">固定玻璃</option>
+                  <option value="turn">平开扇</option>
+                  <option value="turn_tilt">内开内倒</option>
+                  <option value="top_hung">上悬窗</option>
+                  <option value="bottom_hung">下悬窗</option>
+                  <option value="sliding">推拉扇</option>
+                  <option value="lift_slide">提升推拉</option>
+                  <option value="psk">PSK平移内倒</option>
+                  <option value="parallel_slide">平行推拉</option>
+                  <option value="parallel_project">平行推出</option>
+                  <option value="pocket_slide">入墙推拉</option>
+                  <option value="corner_slide">转角推拉</option>
+                  <option value="vertical_slide">上下提拉</option>
+                  <option value="folding">折叠窗</option>
+                  <option value="door">门扇</option>
+                  <option value="screen">纱窗</option>
+                  <option value="louver">百叶</option>
+                  <option value="grille">格条</option>
+                  <option value="panel">面板</option>
+                  <option value="empty">留空/墙体</option>
+                </select>
+              </label>
+              <label>开启方向
+                <select id="opening">
+                  <option value="left_in">左内开</option>
+                  <option value="right_in">右内开</option>
+                  <option value="left_out">左外开</option>
+                  <option value="right_out">右外开</option>
+                  <option value="slide_left">左推拉</option>
+                  <option value="slide_right">右推拉</option>
+                  <option value="top_out">上悬外开</option>
+                  <option value="bottom_in">下悬内开</option>
+                  <option value="lift_slide_left">提升后向左推拉</option>
+                  <option value="slide_up">下扇上提</option>
+                  <option value="fold_left">向左折叠</option>
+                </select>
+              </label>
+              <label>玻璃<input id="cellGlass" /></label>
+              <label>五金<input id="cellHardware" /></label>
+              <label>执手高度 mm<input id="handleHeight" type="number" min="0" step="10" /></label>
+                <label>备注<input id="cellNote" /></label>
+              </div>
+              <div id="openingAssemblyPanel" class="assembly-config">
+                <div class="assembly-config-head">
+                  <h3>组合配置</h3>
+                  <span id="assemblySummary"></span>
+                </div>
+                <div class="form-grid one">
+                  <label data-assembly-field="panelCount">扇数<input id="assemblyPanelCount" type="number" min="1" max="12" step="1" /></label>
+                  <label data-assembly-field="activePanelCount">活动扇数<input id="assemblyActivePanelCount" type="number" min="0" max="12" step="1" /></label>
+                  <label data-assembly-field="trackCount">轨道数<input id="assemblyTrackCount" type="number" min="1" max="8" step="1" /></label>
+                  <label data-assembly-field="stackSide">收拢方向
+                    <select id="assemblyStackSide">
+                      <option value="left">向左</option>
+                      <option value="right">向右</option>
+                      <option value="both">向两侧</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="primarySide">主扇位置
+                    <select id="assemblyPrimarySide">
+                      <option value="left">左侧</option>
+                      <option value="right">右侧</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="mullionMode">中梃形式
+                    <select id="assemblyMullionMode">
+                      <option value="fixed_mullion">固定中梃</option>
+                      <option value="flying_mullion">假中梃/无中梃</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="openPlane">折叠方向
+                    <select id="assemblyOpenPlane">
+                      <option value="in">向室内折</option>
+                      <option value="out">向室外折</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="operationPriority">执手逻辑
+                    <select id="assemblyOperationPriority">
+                      <option value="turn_first">平开优先</option>
+                      <option value="tilt_first">内倒优先</option>
+                      <option value="slide_first">平移优先</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="ventilationMode">通风档
+                    <select id="assemblyVentilationMode">
+                      <option value="none">无</option>
+                      <option value="tilt">内倒通风</option>
+                      <option value="micro">微通风</option>
+                      <option value="night">夜间通风</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="trafficDoor">通行扇
+                    <select id="assemblyTrafficDoor">
+                      <option value="none">无</option>
+                      <option value="left">左侧</option>
+                      <option value="right">右侧</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="screenMode">配套纱窗
+                    <select id="assemblyScreenMode">
+                      <option value="none">无</option>
+                      <option value="fixed">固定纱窗</option>
+                      <option value="swing">平开纱扇</option>
+                      <option value="sliding">推拉纱扇</option>
+                      <option value="retractable">卷轴纱窗</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="cornerAngleDeg">转角角度 °<input id="assemblyCornerAngle" type="number" min="60" max="180" step="1" /></label>
+                  <label data-assembly-field="cornerPostMode">转角结构
+                    <select id="assemblyCornerPostMode">
+                      <option value="postless">无转角柱</option>
+                      <option value="post">带转角柱</option>
+                    </select>
+                  </label>
+                  <label data-assembly-field="pocketDepthMm">墙腔深度 mm<input id="assemblyPocketDepth" type="number" min="0" max="4000" step="10" /></label>
+                </div>
+              </div>
+            </section>
+        </div>
+
+        <div id="inspector-member" class="inspector-pane hidden">
+          <section class="section">
+            <div class="inspector-object-head">
+              <div>
+                <h2 id="memberTitle">局部中梃</h2>
+                <span id="memberHostLabel">未选择</span>
+              </div>
+              <button id="btnDeleteMember" class="danger">删除</button>
+            </div>
+            <div class="form-grid one">
+              <label>方向
+                <select id="memberOrientation">
+                  <option value="vertical">竖向</option>
+                  <option value="horizontal">横向</option>
+                </select>
+              </label>
+              <label>所在位置 %<input id="memberPosition" type="number" min="8" max="92" step="1" /></label>
+              <div class="member-range-row">
+                <label>起点 %<input id="memberSpanStart" type="number" min="0" max="95" step="1" /></label>
+                <label>终点 %<input id="memberSpanEnd" type="number" min="5" max="100" step="1" /></label>
+              </div>
+              <label>型材编码<input id="memberProfile" placeholder="默认使用当前系列中梃" /></label>
+              <label>连接方式
+                <select id="memberThroughMode">
+                  <option value="local">局部梃</option>
+                  <option value="continuous">连续梃</option>
+                </select>
+              </label>
+              <div class="member-range-row">
+                <label>起点节点
+                  <select id="memberConnectionStart">
+                    <option value="butt">端接</option>
+                    <option value="through">贯通</option>
+                  </select>
+                </label>
+                <label>终点节点
+                  <select id="memberConnectionEnd">
+                    <option value="butt">端接</option>
+                    <option value="through">贯通</option>
+                  </select>
+                </label>
+              </div>
+              <label>备注<input id="memberNote" /></label>
+            </div>
+          </section>
+          <section class="section topology-summary">
+            <h2>拓扑信息</h2>
+            <ul id="memberTopologySummary" class="mini-list"></ul>
+          </section>
+        </div>
+
+        <div id="inspector-joint" class="inspector-pane hidden">
+          <section class="section">
+            <div class="inspector-object-head">
+              <div>
+                <h2 id="jointTitle">连接节点</h2>
+                <span id="jointHostLabel">未选择</span>
+              </div>
+              <button id="btnDeleteJoint" class="danger">删除</button>
+            </div>
+            <div class="joint-detail-wrap">
+              <svg id="jointDetailPreview" viewBox="0 0 260 150" role="img" aria-label="连接节点截面预览"></svg>
+            </div>
+            <div class="form-grid one">
+              <label>节点类型
+                <select id="jointType">
+                  <option value="splice">拼接料</option>
+                  <option value="corner">转角料</option>
+                </select>
+              </label>
+              <label>节点样式<select id="jointStyle"></select></label>
+              <label>安装方向
+                <select id="jointOrientation">
+                  <option value="normal">正装</option>
+                  <option value="reversed">反装</option>
+                </select>
+              </label>
+              <label>连接边
+                <select id="jointHostEdge">
+                  <option value="left">左边</option>
+                  <option value="right">右边</option>
+                  <option value="top">上边</option>
+                  <option value="bottom">下边</option>
+                </select>
+              </label>
+              <label id="jointAngleField">转角角度 °<input id="jointAngle" type="number" min="60" max="180" step="1" /></label>
+              <div class="member-range-row">
+                <label>A侧宽度 mm<input id="jointLegA" type="number" min="10" max="300" step="1" /></label>
+                <label>B侧宽度 mm<input id="jointLegB" type="number" min="10" max="300" step="1" /></label>
+              </div>
+              <div class="member-range-row">
+                <label>起点 %<input id="jointSpanStart" type="number" min="0" max="95" step="1" /></label>
+                <label>终点 %<input id="jointSpanEnd" type="number" min="5" max="100" step="1" /></label>
+              </div>
+              <label>型材编码<input id="jointProfile" /></label>
+              <label>相邻框处理
+                <select id="jointFrameTreatment">
+                  <option value="keep_both">保留双框</option>
+                  <option value="shared_frame">共用单框</option>
+                  <option value="connector_only">仅增加连接料</option>
+                </select>
+              </label>
+              <label id="jointPostModeField">转角结构
+                <select id="jointPostMode">
+                  <option value="profile">带转角型材</option>
+                  <option value="postless">无柱密封连接</option>
+                </select>
+              </label>
+              <label>紧固间距 mm<input id="jointFastenerSpacing" type="number" min="100" max="1000" step="10" /></label>
+              <label>备注<input id="jointNote" /></label>
+            </div>
+          </section>
+          <section class="section topology-summary">
+            <h2>节点状态</h2>
+            <ul id="jointSummary" class="mini-list"></ul>
+          </section>
+        </div>
+
+        <div id="inspector-assembly" class="inspector-pane hidden">
+          <section class="section">
+            <div class="inspector-object-head">
+              <div>
+                <h2 id="projectAssemblyTitle">门窗组合</h2>
+                <span id="placementWindowLabel">选择组合中的窗体</span>
+              </div>
+              <button id="btnDeletePlacement" class="danger">移出组合</button>
+            </div>
+            <div class="form-grid one">
+              <label>当前组合<select id="projectAssemblySelect"></select></label>
+              <label>组合名称<input id="projectAssemblyName" /></label>
+              <label>根窗<select id="projectAssemblyRoot"></select></label>
+              <label>参照窗<select id="placementReference"></select></label>
+              <label>停靠位置
+                <select id="placementDock">
+                  <option value="left">左侧</option>
+                  <option value="right">右侧</option>
+                  <option value="top">上方</option>
+                  <option value="bottom">下方</option>
+                  <option value="free">自由定位</option>
+                </select>
+              </label>
+              <label>对齐方式
+                <select id="placementAlign">
+                  <option value="start">起边对齐</option>
+                  <option value="center">居中对齐</option>
+                  <option value="end">末边对齐</option>
+                </select>
+              </label>
+              <div class="member-range-row">
+                <label>连接间隙 mm<input id="placementGap" type="number" min="0" max="2000" step="1" /></label>
+                <label>对齐偏移 mm<input id="placementOffset" type="number" min="-10000" max="10000" step="1" /></label>
+              </div>
+              <label>空间转角 °<input id="placementRotation" type="number" min="-180" max="180" step="1" /></label>
+              <div id="placementFreeFields" class="assembly-free-fields hidden">
+                <label>X mm<input id="placementFreeX" type="number" min="-50000" max="50000" step="10" /></label>
+                <label>Y mm<input id="placementFreeY" type="number" min="-50000" max="50000" step="10" /></label>
+                <label>Z mm<input id="placementFreeZ" type="number" min="-50000" max="50000" step="10" /></label>
+              </div>
+              <label>连接节点<select id="placementJoint"></select></label>
+              <label>备注<input id="placementNote" /></label>
+            </div>
+            <button id="btnDeleteAssembly" class="danger full-width-action">删除整个组合</button>
+          </section>
+          <section class="section topology-summary">
+            <h2>组合状态</h2>
+            <ul id="projectAssemblySummary" class="mini-list"></ul>
+          </section>
+        </div>
+      </aside>
+
+      <section id="bomWorkspace" class="bom-workspace">
+        <div class="bom-module-head">
+          <div>
+            <h2>算料与BOM</h2>
+            <p>由当前设计JSON生成，可确认后冻结为制造版本。</p>
+          </div>
+          <div class="bom-actions">
+            <span class="status-pill"><span id="calcDot" class="dot warn"></span><span id="calcStatus">未算料</span></span>
+            <button id="btnRecalc" class="primary">重新算料</button>
+            <button id="btnConfirm">确认BOM</button>
+            <button id="btnFreeze">冻结版本</button>
+            <button id="btnExportBom">导出BOM</button>
+          </div>
+        </div>
+        <div class="bom-kpis">
+          <div class="kpi"><span>门窗数</span><strong id="kpiWindows">0</strong></div>
+          <div class="kpi"><span>BOM行</span><strong id="kpiLines">0</strong></div>
+          <div class="kpi"><span>材料类</span><strong id="kpiCats">0</strong></div>
+        </div>
+        <div class="tabs bom-tabs" role="tablist" aria-label="BOM视图">
+          <button class="bom-tab active" data-bom-tab="summary">汇总BOM</button>
+          <button class="bom-tab" data-bom-tab="detail">制造明细</button>
+        </div>
+        <div id="bom-summary" class="bom-pane">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>类别</th><th>编码</th><th>名称/规格</th><th class="num">数量</th><th>单位</th></tr>
+              </thead>
+              <tbody id="bomSummaryRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="bom-detail" class="bom-pane hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>来源</th><th>物料</th><th class="num">尺寸</th><th class="num">角度</th><th class="num">数量</th></tr>
+              </thead>
+              <tbody id="bomDetailRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="previewDialog" class="preview-dialog" aria-labelledby="previewDialogTitle">
+      <div class="preview-dialog-shell">
+        <div class="preview-head">
+          <div>
+            <h2 id="previewDialogTitle">3D窗体预览</h2>
+            <span id="previewStats">加载中</span>
+          </div>
+          <div class="preview-actions">
+            <span id="previewViewSide" class="preview-view-side">主立面：室外侧观察</span>
+            <span class="preview-help">左键选择，右键菜单，Ctrl / Shift 多选，拖动旋转视角</span>
+            <button id="btnResetView" class="ghost">复位视角</button>
+            <button id="btnClosePreview">关闭</button>
+          </div>
+        </div>
+        <div class="preview-layout">
+          <div class="preview-shell">
+            <canvas id="preview3d" aria-label="门窗3D预览"></canvas>
+            <div id="previewFallback" class="preview-fallback">正在生成3D预览</div>
+            <div id="previewContextMenu" class="object-menu preview-object-menu hidden" role="menu" aria-label="3D构件操作">
+              <div id="previewMenuTitle" class="object-menu-title">构件操作</div>
+              <button id="btnPreviewMenuSelectOnly" role="menuitem">仅选择此构件</button>
+              <button id="btnPreviewMenuToggle" role="menuitem">加入多选</button>
+              <div class="object-menu-separator"></div>
+              <button id="btnPreviewMenuPlay" role="menuitem">播放选中开合</button>
+              <button id="btnPreviewMenuOpen" role="menuitem">选中开启</button>
+              <button id="btnPreviewMenuClose" role="menuitem">选中关闭</button>
+              <div class="object-menu-separator"></div>
+              <button id="btnPreviewMenuEdit" role="menuitem">编辑二维属性</button>
+            </div>
+          </div>
+          <aside class="preview-motion-bar">
+            <section class="preview-control-section">
+              <div class="preview-section-title">
+                <strong>构件选择</strong>
+                <span id="previewSelectionCount">已选 0</span>
+              </div>
+              <div class="selection-mode" aria-label="选择方式">
+                <button class="preview-select-mode active" data-preview-select-mode="single" aria-pressed="true">单选</button>
+                <button class="preview-select-mode" data-preview-select-mode="multiple" aria-pressed="false">多选</button>
+              </div>
+              <div id="previewPartList" class="preview-part-list" role="listbox" aria-label="可开启构件" aria-multiselectable="true"></div>
+            </section>
+            <label>开启方式
+              <select id="previewMotionMode" aria-label="开启方式">
+                <option value="primary">按构件开启</option>
+                <option value="tilt">内倒</option>
+              </select>
+            </label>
+            <label class="preview-range">
+              <span>开启幅度 <output id="previewOpenValue" for="previewOpenRange">0%</output></span>
+              <input id="previewOpenRange" type="range" min="0" max="100" step="1" value="0" />
+            </label>
+            <div class="motion-actions">
+              <button id="btnPartClose">关闭选中</button>
+              <button id="btnPartOpen">开启选中</button>
+              <button id="btnAllClose">全部关闭</button>
+              <button id="btnAllOpen">全部开启</button>
+            </div>
+            <button id="btnPlaySelected" class="primary preview-play">播放选中开合</button>
+            <span id="previewMotionStatus" class="preview-motion-status">请选择可开启构件</span>
+          </aside>
+        </div>
+      </div>
+    </dialog>
+  </div>
+  <div id="cellContextMenu" class="object-menu cell-object-menu hidden" role="menu" aria-label="窗格快捷操作">
+    <div id="cellMenuTitle" class="object-menu-title">窗格操作</div>
+    <button data-cell-menu-type="fixed_glass" role="menuitem">设为固定玻璃</button>
+    <button data-cell-menu-type="turn" role="menuitem">设为平开扇</button>
+    <button data-cell-menu-type="turn_tilt" role="menuitem">设为内开内倒</button>
+    <button data-cell-menu-type="top_hung" role="menuitem">设为上悬窗</button>
+    <button data-cell-menu-type="bottom_hung" role="menuitem">设为下悬窗</button>
+    <button data-cell-menu-type="sliding" role="menuitem">设为推拉扇</button>
+    <button data-cell-menu-type="lift_slide" role="menuitem">设为提升推拉</button>
+    <button data-cell-menu-type="psk" role="menuitem">设为PSK平移内倒</button>
+    <button data-cell-menu-type="parallel_slide" role="menuitem">设为平行推拉</button>
+    <button data-cell-menu-type="parallel_project" role="menuitem">设为平行推出</button>
+    <button data-cell-menu-type="pocket_slide" role="menuitem">设为入墙推拉</button>
+    <button data-cell-menu-type="corner_slide" role="menuitem">设为转角推拉</button>
+    <button data-cell-menu-type="vertical_slide" role="menuitem">设为上下提拉</button>
+    <button data-cell-menu-type="folding" role="menuitem">设为折叠窗</button>
+    <div class="object-menu-separator"></div>
+    <button id="btnCellMenuEdit" role="menuitem">编辑构件属性</button>
+    <button id="btnCellMenuPreview" role="menuitem">在3D中查看</button>
+  </div>
+  <div id="memberContextMenu" class="object-menu member-object-menu hidden" role="menu" aria-label="局部中梃操作">
+    <div id="memberMenuTitle" class="object-menu-title">局部中梃</div>
+    <button id="btnMemberMenuEdit" role="menuitem">编辑局部梃</button>
+    <button id="btnMemberMenuDelete" class="danger" role="menuitem">删除局部梃</button>
+  </div>
+  <div id="jointContextMenu" class="object-menu joint-object-menu hidden" role="menu" aria-label="连接节点操作">
+    <div id="jointMenuTitle" class="object-menu-title">连接节点</div>
+    <button id="btnJointMenuEdit" role="menuitem">编辑连接节点</button>
+    <button id="btnJointMenuDelete" class="danger" role="menuitem">删除连接节点</button>
+  </div>
+  <div id="assemblyContextMenu" class="object-menu assembly-object-menu hidden" role="menu" aria-label="组合窗体操作">
+    <div id="assemblyMenuTitle" class="object-menu-title">组合窗体</div>
+    <button id="btnAssemblyMenuEdit" role="menuitem">编辑装配属性</button>
+    <button id="btnAssemblyMenuPreview" role="menuitem">查看组合3D</button>
+    <button id="btnAssemblyMenuRemove" class="danger" role="menuitem">移出组合</button>
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <script type="module" src="assets/app.js?v=20260912-27"></script>
+</body>
+</html>
