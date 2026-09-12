@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-31" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-32" />
   <script type="importmap">
     {
       "imports": {
@@ -76,6 +76,7 @@
                 <button class="palette-tile" data-shape-preset="trapezoid_peak"><span>⌂</span><strong>双斜顶框</strong></button>
                 <button class="palette-tile" data-shape-preset="notch_top_left"><span>┌</span><strong>左上缺角框</strong></button>
                 <button class="palette-tile" data-shape-preset="notch_top_right"><span>┐</span><strong>右上缺角框</strong></button>
+                <button class="palette-tile" data-shape-preset="custom_polygon"><span>DIY</span><strong>DIY异形框</strong></button>
               </div>
             </section>
 
@@ -324,9 +325,13 @@
                   <option value="trapezoid_peak">双斜顶</option>
                   <option value="notch_top_left">左上缺角</option>
                   <option value="notch_top_right">右上缺角</option>
+                  <option value="custom_polygon">DIY异形</option>
                 </select>
               </label>
               <label>上拱高度 mm<input id="archHeight" type="number" min="0" step="10" /></label>
+              <label id="shapePointsField" class="field-wide">DIY点位 %
+                <textarea id="shapePoints" rows="3" spellcheck="false" placeholder="0,20 50,0 100,20 100,100 0,100"></textarea>
+              </label>
             </div>
           </section>
           <section class="section inspector-summary">
@@ -876,6 +881,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-31"></script>
+  <script type="module" src="assets/app.js?v=20260912-32"></script>
 </body>
 </html>

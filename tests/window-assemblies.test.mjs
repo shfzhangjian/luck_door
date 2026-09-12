@@ -147,8 +147,9 @@ const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8"
   "inspector-assembly",
   "assemblyContextMenu"
 ].forEach(id => assert.ok(html.includes(`id="${id}"`), `${id} should be available in the drawing workbench`));
-["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right"].forEach(shapeType => {
+["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon"].forEach(shapeType => {
   assert.ok(html.includes(`data-shape-preset="${shapeType}"`) || html.includes(`value="${shapeType}"`), `${shapeType} should be exposed as a shape preset`);
 });
+assert.ok(html.includes('id="shapePoints"'), "DIY polygon frames should expose editable point coordinates");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");

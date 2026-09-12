@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-31";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-31";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-32";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-32";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-31";
+} from "./openings.js?v=20260912-32";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-31";
+} from "./topology.js?v=20260912-32";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-31";
+} from "./joints.js?v=20260912-32";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-31";
+} from "./assemblies.js?v=20260912-32";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-31";
+} from "./installations.js?v=20260912-32";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -72,7 +72,8 @@ const SHAPE_PRESETS = Object.freeze([
   { type: "trapezoid_left", label: "左斜顶框", icon: "⍀", description: "左侧斜顶或反向平行四边形外框" },
   { type: "trapezoid_peak", label: "双斜顶框", icon: "⌂", description: "顶部双坡/尖顶异形框" },
   { type: "notch_top_left", label: "左上缺角框", icon: "┌", description: "左上角让位的 L 形外框" },
-  { type: "notch_top_right", label: "右上缺角框", icon: "┐", description: "右上角让位的 L 形外框" }
+  { type: "notch_top_right", label: "右上缺角框", icon: "┐", description: "右上角让位的 L 形外框" },
+  { type: "custom_polygon", label: "DIY异形框", icon: "DIY", description: "按点位录入的自定义多边形外框" }
 ]);
 const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(item => [item.type, item])));
 
@@ -221,14 +222,49 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
 
     function normalizeWindowShape(value = {}) {
       const type = SHAPE_PRESET_BY_TYPE[value?.type] ? value.type : "rectangular";
+      const defaultPoints = type === "custom_polygon"
+        ? [{ x: 0, y: 20 }, { x: 50, y: 0 }, { x: 100, y: 20 }, { x: 100, y: 100 }, { x: 0, y: 100 }]
+        : [];
       return {
         type,
-        archHeightMm: type === "arched" ? Math.max(120, Math.round(Number(value.archHeightMm) || 220)) : 0
+        archHeightMm: type === "arched" ? Math.max(120, Math.round(Number(value.archHeightMm) || 220)) : 0,
+        points: type === "custom_polygon" ? normalizeShapePoints(value.points, defaultPoints) : []
       };
     }
 
     function shapeLabel(type) {
       return SHAPE_PRESET_BY_TYPE[type]?.label || SHAPE_PRESET_BY_TYPE.rectangular.label;
+    }
+
+    function normalizeShapePoints(points, fallback = []) {
+      const source = Array.isArray(points) ? points : fallback;
+      const normalized = source
+        .map(point => ({
+          x: Math.min(100, Math.max(0, Math.round(Number(point?.x) * 10) / 10)),
+          y: Math.min(100, Math.max(0, Math.round(Number(point?.y) * 10) / 10))
+        }))
+        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+      return normalized.length >= 3 ? normalized : fallback;
+    }
+
+    function parseShapePointsText(text, fallback = []) {
+      const points = String(text || "")
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(Boolean)
+        .map(token => {
+          const [x, y] = token.split(",").map(Number);
+          return { x, y };
+        });
+      return normalizeShapePoints(points, fallback);
+    }
+
+    function formatShapePoints(points) {
+      return normalizeShapePoints(points).map(point => `${formatPointCoord(point.x)},${formatPointCoord(point.y)}`).join(" ");
+    }
+
+    function formatPointCoord(value) {
+      return Number.isInteger(value) ? String(value) : value.toFixed(1);
     }
 
     function createCell(type = "fixed_glass", opening = "") {
@@ -481,9 +517,12 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       win.heightMm = Math.max(300, Number(valueOf("winHeight") || 1500));
       win.floor = valueOf("winFloor");
       win.room = valueOf("winRoom");
+      const shapeType = valueOf("winShape");
+      const currentPoints = win.shape?.type === "custom_polygon" ? win.shape.points : undefined;
       win.shape = normalizeWindowShape({
-        type: valueOf("winShape"),
-        archHeightMm: Math.max(0, Number(valueOf("archHeight") || 0))
+        type: shapeType,
+        archHeightMm: Math.max(0, Number(valueOf("archHeight") || 0)),
+        points: shapeType === "custom_polygon" ? parseShapePointsText(valueOf("shapePoints"), currentPoints) : []
       });
       win.installation ||= { sillHeightMm: 0 };
       win.installation.sillHeightMm = Math.max(0, Number(valueOf("sillHeight") || 0));
@@ -1443,6 +1482,9 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       setValue("winRoom", win.room || "");
       renderSelect("winShape", SHAPE_PRESETS.map(item => [item.type, item.label]), win.shape.type || "rectangular");
       setValue("archHeight", win.shape.archHeightMm || 0);
+      setValue("shapePoints", formatShapePoints(win.shape.points || []));
+      document.getElementById("shapePointsField")?.classList.toggle("hidden", win.shape.type !== "custom_polygon");
+      document.getElementById("archHeight")?.closest("label")?.classList.toggle("hidden", win.shape.type !== "arched");
       renderSelect("seriesId", project.catalog.profileSystems.map(s => [s.id, `${s.id} · ${s.name}`]), win.seriesId);
       renderSelect("glassTypeId", project.catalog.glassTypes.map(g => [g.id, g.name]), win.defaultGlassTypeId);
       renderSelect("hardwareSetId", project.catalog.hardwareSets.map(h => [h.id, h.name]), win.defaultHardwareSetId);
@@ -3203,6 +3245,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           [[innerX, innerY], [innerX + innerW - notch * 0.72, innerY], [innerX + innerW, innerY + notch * 0.72], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]]
         );
       }
+      if (shapeType === "custom_polygon") {
+        const outer = normalizeShapePoints(win.shape.points).map(point => [x + point.x / 100 * w, y + point.y / 100 * h]);
+        const inner = insetPolygonTowardCentroid(outer, Math.min(face, w * 0.18, h * 0.18));
+        if (outer.length >= 3 && inner.length >= 3) return polygonFramePath(outer, inner);
+      }
       return `M${x} ${y}h${w}v${h}h-${w}Z M${innerX} ${innerY}v${innerH}h${innerW}v-${innerH}Z`;
     }
 
@@ -3212,6 +3259,20 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
 
     function polygonPath(points) {
       return points.map(([px, py], index) => `${index === 0 ? "M" : "L"}${px} ${py}`).join(" ") + " Z";
+    }
+
+    function insetPolygonTowardCentroid(points, inset) {
+      if (!points.length) return [];
+      const center = points.reduce((acc, [px, py]) => ({ x: acc.x + px, y: acc.y + py }), { x: 0, y: 0 });
+      center.x /= points.length;
+      center.y /= points.length;
+      return points.map(([px, py]) => {
+        const dx = center.x - px;
+        const dy = center.y - py;
+        const length = Math.hypot(dx, dy) || 1;
+        const move = Math.min(inset, length * 0.45);
+        return [px + dx / length * move, py + dy / length * move];
+      });
     }
 
     function computeCellRects(win, inner) {
@@ -5641,7 +5702,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       ["projectId", "projectName", "customerName", "projectAddress", "orderId", "batchNo"].forEach(id => {
         bindById(id, "change", updateProjectFromInputs);
       });
-      ["winMark", "winQty", "winWidth", "winHeight", "sillHeight", "winFloor", "winRoom", "winShape", "archHeight"].forEach(id => {
+      ["winMark", "winQty", "winWidth", "winHeight", "sillHeight", "winFloor", "winRoom", "winShape", "archHeight", "shapePoints"].forEach(id => {
         bindById(id, "change", updateWindowFromInputs);
       });
       ["seriesId", "colorInside", "colorOutside", "glassTypeId", "hardwareSetId"].forEach(id => {
