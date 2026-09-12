@@ -606,6 +606,22 @@
         "glassTypeId": { "type": "string" },
         "hardwareSetId": { "type": "string" },
         "panelTypeId": { "type": "string" },
+        "infillType": {
+          "type": "string",
+          "description": "窗格或开启扇内部填充；不改变主体开启方式。",
+          "enum": ["glass", "panel", "louver"]
+        },
+        "accessories": {
+          "type": "object",
+          "description": "叠加在主体窗格上的辅件配置，不替代开启扇。",
+          "properties": {
+            "grille": { "type": "boolean" },
+            "screenMode": { "type": "string", "enum": ["none", "fixed", "swing", "sliding", "retractable"] },
+            "securityBars": { "type": "boolean" },
+            "frosted": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
         "handleHeightMm": { "type": "number", "minimum": 0 },
         "note": { "type": "string" }
       },

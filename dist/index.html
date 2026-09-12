@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-41" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-42" />
   <script type="importmap">
     {
       "imports": {
@@ -484,6 +484,25 @@
               </label>
               <label>玻璃<input id="cellGlass" /></label>
               <label>五金<input id="cellHardware" /></label>
+              <label>填充类型
+                <select id="cellInfill">
+                  <option value="glass">玻璃</option>
+                  <option value="panel">面板</option>
+                  <option value="louver">百叶</option>
+                </select>
+              </label>
+              <label>配套纱窗
+                <select id="cellScreenMode">
+                  <option value="none">无</option>
+                  <option value="fixed">固定纱窗</option>
+                  <option value="swing">平开纱扇</option>
+                  <option value="sliding">推拉纱扇</option>
+                  <option value="retractable">卷轴纱窗</option>
+                </select>
+              </label>
+              <label><input id="cellAccessoryGrille" type="checkbox" /> 带格条</label>
+              <label><input id="cellAccessorySecurity" type="checkbox" /> 带防盗条</label>
+              <label><input id="cellAccessoryFrosted" type="checkbox" /> 玻璃磨砂效果</label>
               <label>执手高度 mm<input id="handleHeight" type="number" min="0" step="10" /></label>
                 <label>备注<input id="cellNote" /></label>
               </div>
@@ -916,6 +935,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-41"></script>
+  <script type="module" src="assets/app.js?v=20260912-42"></script>
 </body>
 </html>

@@ -1,9 +1,9 @@
-import { typeLabels } from "./catalog.js?v=20260912-27";
-import { isGlassInfillType, isOperableType, normalizeOpeningAssembly } from "./openings.js?v=20260912-27";
-import { findMemberHost, memberLengthMm, normalizeTopology, partitionTopologyRegion } from "./topology.js?v=20260912-27";
-import { JOINT_STYLE_OPTIONS, defaultJointProfile, jointLengthMm, normalizeEngineeringJoints } from "./joints.js?v=20260912-27";
-import { assemblySummary, normalizeWindowAssemblies } from "./assemblies.js?v=20260912-27";
-import { surroundGeometry, surroundSideLabel, surroundSummary } from "./installations.js?v=20260912-27";
+import { typeLabels } from "./catalog.js?v=20260912-42";
+import { isGlassInfillType, isOperableType, normalizeOpeningAssembly } from "./openings.js?v=20260912-42";
+import { findMemberHost, memberLengthMm, normalizeTopology, partitionTopologyRegion } from "./topology.js?v=20260912-42";
+import { JOINT_STYLE_OPTIONS, defaultJointProfile, jointLengthMm, normalizeEngineeringJoints } from "./joints.js?v=20260912-42";
+import { assemblySummary, normalizeWindowAssemblies } from "./assemblies.js?v=20260912-42";
+import { surroundGeometry, surroundSideLabel, surroundSummary } from "./installations.js?v=20260912-42";
 
 export function sum(list) {
       return list.reduce((a, b) => a + Number(b || 0), 0) || 1;
@@ -45,6 +45,27 @@ export function materialName(material) {
         }
       };
       return rows[type] || null;
+    }
+
+    function normalizeCellInfillType(value, type = "") {
+      if (value === "panel" || type === "panel") return "panel";
+      if (value === "louver" || type === "louver") return "louver";
+      return "glass";
+    }
+
+    function normalizeCellAccessories(cell = {}) {
+      const source = cell.accessories || {};
+      const legacyGrille = cell.type === "grille";
+      const legacyScreen = cell.type === "screen";
+      const screenMode = ["fixed", "swing", "sliding", "retractable"].includes(source.screenMode)
+        ? source.screenMode
+        : (legacyScreen ? "fixed" : "none");
+      return {
+        grille: Boolean(source.grille || legacyGrille),
+        screenMode,
+        securityBars: Boolean(source.securityBars),
+        frosted: Boolean(source.frosted)
+      };
     }
 
     function glassForCell(input, win, cell) {
@@ -850,6 +871,8 @@ export function calculateProjectBom(input) {
           const sourceComponentId = `cell.${r + 1}.${c + 1}`;
           if (cell.type === "empty") continue;
           const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+          const infillType = normalizeCellInfillType(cell.infillType, cell.type);
+          const accessories = normalizeCellAccessories(cell);
 
           ebom.push({
             sourceWindowId: win.windowId,
@@ -857,16 +880,18 @@ export function calculateProjectBom(input) {
             type: cell.type,
             opening: cell.opening,
             openingAssembly: assembly,
+            infillType,
+            accessories,
             widthMm: Math.round(cellW),
             heightMm: Math.round(cellH)
           });
 
-          if (cell.type === "panel") {
+          if (cell.type === "panel" || infillType === "panel") {
             const panel = input.catalog.panelTypes.find(p => p.id === cell.panelTypeId) || input.catalog.panelTypes[0];
             addBomLine(lines, {
               sourceWindowId: win.windowId,
               sourceMark: win.mark,
-              sourceComponentId,
+              sourceComponentId: `${sourceComponentId}.panel`,
               category: "panel",
               materialCode: panel.id,
               name: panel.name,
@@ -882,7 +907,7 @@ export function calculateProjectBom(input) {
               quantity: qty,
               unit: "pcs"
             });
-            continue;
+            if (!isOperableType(cell.type) && cell.type !== "fixed_glass") continue;
           }
 
           const accessory = accessoryBom(cell.type, cellW, cellH, qty);
@@ -907,6 +932,119 @@ export function calculateProjectBom(input) {
               unit: accessory.unit
             });
             continue;
+          }
+
+          if (infillType === "louver") {
+            const louver = accessoryBom("louver", cellW, cellH, qty);
+            addBomLine(lines, {
+              sourceWindowId: win.windowId,
+              sourceMark: win.mark,
+              sourceComponentId: `${sourceComponentId}.louver`,
+              category: "accessory",
+              materialCode: louver.materialCode,
+              name: louver.name,
+              spec: louver.spec,
+              material: "门窗配件",
+              color: frameColor,
+              lengthMm: 0,
+              widthMm: Math.round(cellW),
+              heightMm: Math.round(cellH),
+              cutLeftDeg: 0,
+              cutRightDeg: 0,
+              grossLengthMm: 0,
+              quantity: louver.quantity,
+              unit: louver.unit
+            });
+          }
+
+          if (accessories.grille) {
+            const grille = accessoryBom("grille", cellW, cellH, qty);
+            addBomLine(lines, {
+              sourceWindowId: win.windowId,
+              sourceMark: win.mark,
+              sourceComponentId: `${sourceComponentId}.grille`,
+              category: "accessory",
+              materialCode: grille.materialCode,
+              name: grille.name,
+              spec: grille.spec,
+              material: "门窗配件",
+              color: frameColor,
+              lengthMm: 0,
+              widthMm: Math.round(cellW),
+              heightMm: Math.round(cellH),
+              cutLeftDeg: 0,
+              cutRightDeg: 0,
+              grossLengthMm: 0,
+              quantity: grille.quantity,
+              unit: grille.unit
+            });
+          }
+
+          if (accessories.screenMode !== "none" && (!isOperableType(cell.type) || assembly.screenMode === "none")) {
+            const screen = accessoryBom("screen", cellW, cellH, qty);
+            addBomLine(lines, {
+              sourceWindowId: win.windowId,
+              sourceMark: win.mark,
+              sourceComponentId: `${sourceComponentId}.screen`,
+              category: "accessory",
+              materialCode: screen.materialCode,
+              name: screen.name,
+              spec: screen.spec,
+              material: "门窗配件",
+              color: frameColor,
+              lengthMm: 0,
+              widthMm: Math.round(cellW),
+              heightMm: Math.round(cellH),
+              cutLeftDeg: 0,
+              cutRightDeg: 0,
+              grossLengthMm: 0,
+              quantity: screen.quantity,
+              unit: screen.unit
+            });
+          }
+
+          if (accessories.securityBars) {
+            addBomLine(lines, {
+              sourceWindowId: win.windowId,
+              sourceMark: win.mark,
+              sourceComponentId: `${sourceComponentId}.securityBars`,
+              category: "accessory",
+              materialCode: "ACC-SECURITY-BARS",
+              name: "防盗条",
+              spec: `${Math.round(cellW)}x${Math.round(cellH)}`,
+              material: "门窗配件",
+              color: frameColor,
+              lengthMm: 0,
+              widthMm: Math.round(cellW),
+              heightMm: Math.round(cellH),
+              cutLeftDeg: 0,
+              cutRightDeg: 0,
+              grossLengthMm: 0,
+              quantity: qty,
+              unit: "set"
+            });
+          }
+
+          if (accessories.frosted) {
+            addBomLine(lines, {
+              sourceWindowId: win.windowId,
+              sourceMark: win.mark,
+              sourceComponentId: `${sourceComponentId}.frosted`,
+              category: "accessory",
+              materialCode: "ACC-FROSTED-FILM",
+              name: "玻璃磨砂处理",
+              spec: `${Math.round(cellW)}x${Math.round(cellH)}`,
+              material: "门窗配件",
+              color: "",
+              lengthMm: 0,
+              widthMm: Math.round(cellW),
+              heightMm: Math.round(cellH),
+              cutLeftDeg: 0,
+              cutRightDeg: 0,
+              grossLengthMm: 0,
+              quantity: qty,
+              unit: "set"
+            });
           }
 
           const sash = sashGeometry(cell.type, cellW, cellH, assembly);
@@ -994,7 +1132,7 @@ export function calculateProjectBom(input) {
             });
           }
 
-          if (!isGlassInfillType(cell.type)) continue;
+          if (!isGlassInfillType(cell.type) || infillType !== "glass") continue;
 
           const glass = glassForCell(input, win, cell);
           const clear = isOperableType(cell.type) ? sashFace + 22 : 24;

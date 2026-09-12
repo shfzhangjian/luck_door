@@ -204,6 +204,18 @@ expectedTracks.forEach((quantity, sourceComponentId) => {
   assert.equal(line?.quantity, quantity, `${sourceComponentId} should use the configured track count`);
 });
 
+const layeredProject = structuredClone(project);
+layeredProject.windows[0].layout.cells[0].infillType = "panel";
+layeredProject.windows[0].layout.cells[0].accessories = { grille: true, screenMode: "swing", securityBars: true, frosted: true };
+layeredProject.windows[0].layout.cells[0].openingAssembly.screenMode = "swing";
+const layeredBom = calculateProjectBom(layeredProject);
+assert.ok(layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.handle`), "layered grille or panel options should not replace the operable sash hardware");
+assert.ok(layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.panel`), "panel infill should add a panel line on an operable sash");
+assert.ok(layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.grille`), "grille should be calculated as an accessory on top of the operable sash");
+assert.ok(layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.screen`), "screen should remain a paired accessory on an operable sash");
+assert.ok(layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.frosted`), "frosted glass treatment should be calculated as a layered process");
+assert.ok(!layeredBom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.glass`), "panel infill should replace glass instead of double-counting it");
+
 assert.equal(bom.mbom.lines.find(line => line.sourceComponentId === `${sourceId("turn")}.handle`)?.quantity, 2, "double casement should calculate two handle sets");
 assert.ok(bom.mbom.lines.some(line => line.sourceComponentId === `${sourceId("turn")}.flyingMullion`), "double casement should calculate a flying mullion");
 assert.ok(bom.mbom.lines.some(line => line.materialCode === "ACC-SCREEN-SWING"), "swing screens should be included in MBOM");

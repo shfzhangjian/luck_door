@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-41";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-41";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-42";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-42";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-41";
+} from "./openings.js?v=20260912-42";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-41";
+} from "./topology.js?v=20260912-42";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-41";
+} from "./joints.js?v=20260912-42";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-41";
+} from "./assemblies.js?v=20260912-42";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-41";
+} from "./installations.js?v=20260912-42";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -316,6 +316,39 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       };
     }
 
+    const LEGACY_FILL_CELL_TYPES = Object.freeze(["screen", "louver", "grille", "panel"]);
+    const INFILL_TYPES = Object.freeze(["glass", "panel", "louver"]);
+    const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "retractable"]);
+
+    function migrateLegacyCellType(type) {
+      if (type === "panel") return { type: "fixed_glass", infillType: "panel" };
+      if (type === "louver") return { type: "fixed_glass", infillType: "louver" };
+      if (type === "grille") return { type: "fixed_glass", accessories: { grille: true } };
+      if (type === "screen") return { type: "fixed_glass", accessories: { screenMode: "fixed" } };
+      return { type };
+    }
+
+    function normalizeCellInfillType(value) {
+      return INFILL_TYPES.includes(value) ? value : "glass";
+    }
+
+    function normalizeCellAccessories(value = {}) {
+      const screenMode = CELL_SCREEN_MODES.includes(value?.screenMode) ? value.screenMode : "none";
+      return {
+        grille: Boolean(value?.grille),
+        screenMode,
+        securityBars: Boolean(value?.securityBars),
+        frosted: Boolean(value?.frosted)
+      };
+    }
+
+    function defaultScreenModeForCell(cell) {
+      if (!cell || !isOperableType(cell.type)) return "fixed";
+      if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide", "corner_slide", "vertical_slide"].includes(cell.type)) return "sliding";
+      if (cell.type === "folding") return "retractable";
+      return "swing";
+    }
+
     function createCell(type = "fixed_glass", opening = "") {
       const normalizedOpening = normalizeOpening(type, opening || defaultOpeningForType(type));
       return {
@@ -326,6 +359,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         glassTypeId: "",
         hardwareSetId: defaultHardwareSetForType(type),
         panelTypeId: "PN-SANDWICH",
+        infillType: "glass",
+        accessories: normalizeCellAccessories(),
         handleHeightMm: 750,
         customShape: null,
         note: ""
@@ -352,8 +387,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     }
 
     function normalizeCell(cell) {
-      const type = Object.prototype.hasOwnProperty.call(typeLabels, cell?.type) ? cell.type : "fixed_glass";
+      const migrated = migrateLegacyCellType(cell?.type);
+      const type = Object.prototype.hasOwnProperty.call(typeLabels, migrated.type) ? migrated.type : "fixed_glass";
       const base = createCell(type, cell?.opening);
+      const accessories = normalizeCellAccessories({
+        ...(migrated.accessories || {}),
+        ...(cell?.accessories || {})
+      });
       return {
         ...base,
         cellId: String(cell?.cellId || base.cellId),
@@ -361,6 +401,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         glassTypeId: cell?.glassTypeId || "",
         hardwareSetId: cell?.hardwareSetId || base.hardwareSetId,
         panelTypeId: cell?.panelTypeId || "PN-SANDWICH",
+        infillType: normalizeCellInfillType(cell?.infillType || migrated.infillType),
+        accessories,
         handleHeightMm: Math.max(0, Number(cell?.handleHeightMm ?? 750)),
         customShape: normalizeCellCustomShape(cell?.customShape),
         note: cell?.note || ""
@@ -644,7 +686,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       markDirty();
     }
 
-    function updateCellFromInputs() {
+    function updateCellFromInputs(event) {
       const win = currentWindow();
       const cell = currentCell(win);
       if (!cell) return;
@@ -671,6 +713,24 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       }
       cell.glassTypeId = valueOf("cellGlass");
       cell.hardwareSetId = typeChanged ? defaultHardwareSetForType(nextType) : valueOf("cellHardware");
+      cell.infillType = normalizeCellInfillType(valueOf("cellInfill"));
+      const screenMode = isOperableType(nextType)
+        ? (event?.target?.id === "cellScreenMode" ? valueOf("cellScreenMode") : valueOf("assemblyScreenMode"))
+        : valueOf("cellScreenMode");
+      cell.accessories = normalizeCellAccessories({
+        ...cell.accessories,
+        grille: document.getElementById("cellAccessoryGrille")?.checked,
+        screenMode,
+        securityBars: document.getElementById("cellAccessorySecurity")?.checked,
+        frosted: document.getElementById("cellAccessoryFrosted")?.checked
+      });
+      if (isOperableType(cell.type)) {
+        const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+        cell.openingAssembly = {
+          ...assembly,
+          screenMode: cell.accessories.screenMode
+        };
+      }
       cell.handleHeightMm = Math.max(0, Number(valueOf("handleHeight") || 0));
       cell.note = valueOf("cellNote");
       markDirty();
@@ -891,6 +951,10 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const win = currentWindow();
       const cell = currentCell(win);
       if (!cell) return;
+      if (LEGACY_FILL_CELL_TYPES.includes(type)) {
+        applyCellFillOrAccessory(type);
+        return;
+      }
       const hasLocalMembers = win.topology?.members?.some(member => member.hostRegionId === cell.cellId);
       if (hasLocalMembers && type !== "fixed_glass") {
         showToast("该窗格含局部中梃，请先删除局部梃再设置开启扇或辅件。");
@@ -908,6 +972,41 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       switchInspector("cell");
       markDirty();
       showToast(`选中单元已设为${typeLabels[type] || type}。`);
+    }
+
+    function applyCellFillOrAccessory(type) {
+      const win = currentWindow();
+      const cell = currentCell(win);
+      if (!cell) return;
+      if (cell.type === "empty") {
+        const next = createCell("fixed_glass", "fixed");
+        Object.assign(cell, {
+          type: next.type,
+          opening: next.opening,
+          openingAssembly: next.openingAssembly,
+          hardwareSetId: next.hardwareSetId
+        });
+      }
+      cell.accessories = normalizeCellAccessories(cell.accessories);
+      if (type === "grille") {
+        cell.accessories.grille = !cell.accessories.grille;
+        showToast(cell.accessories.grille ? "已为选中窗格叠加格条。" : "已取消选中窗格格条。");
+      } else if (type === "screen") {
+        const nextMode = cell.accessories.screenMode === "none" ? defaultScreenModeForCell(cell) : "none";
+        cell.accessories.screenMode = nextMode;
+        if (isOperableType(cell.type)) {
+          cell.openingAssembly = normalizeOpeningAssembly(cell.type, cell.opening, {
+            ...cell.openingAssembly,
+            screenMode: nextMode
+          });
+        }
+        showToast(nextMode === "none" ? "已取消配套纱窗。" : "已为选中窗格叠加配套纱窗。");
+      } else if (type === "louver" || type === "panel") {
+        cell.infillType = cell.infillType === type ? "glass" : type;
+        showToast(cell.infillType === "glass" ? "填充已恢复为玻璃。" : `选中窗格填充已设为${typeLabels[type]}。`);
+      }
+      switchInspector("cell");
+      markDirty();
     }
 
     function applyShapePreset(type) {
@@ -1604,6 +1703,15 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         renderSelect("opening", openingOptionsForType(cell.type).map(item => [item.value, item.label]), cell.opening);
         renderInputDatalist("cellGlass", project.catalog.glassTypes, cell.glassTypeId || win.defaultGlassTypeId);
         renderInputDatalist("cellHardware", project.catalog.hardwareSets, cell.hardwareSetId || win.defaultHardwareSetId);
+        renderSelect("cellInfill", [["glass", "玻璃"], ["panel", "面板"], ["louver", "百叶"]], cell.infillType || "glass");
+        renderSelect("cellScreenMode", [["none", "无"], ["fixed", "固定纱窗"], ["swing", "平开纱扇"], ["sliding", "推拉纱扇"], ["retractable", "卷轴纱窗"]], isOperableType(cell.type) ? (cell.openingAssembly?.screenMode || "none") : (cell.accessories?.screenMode || "none"));
+        const accessories = normalizeCellAccessories(cell.accessories);
+        const grille = document.getElementById("cellAccessoryGrille");
+        const security = document.getElementById("cellAccessorySecurity");
+        const frosted = document.getElementById("cellAccessoryFrosted");
+        if (grille) grille.checked = accessories.grille;
+        if (security) security.checked = accessories.securityBars;
+        if (frosted) frosted.checked = accessories.frosted;
         setValue("handleHeight", cell.handleHeightMm ?? 750);
         setValue("cellNote", cell.note || "");
         const operable = isOperableType(cell.type);
@@ -2049,7 +2157,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     function renderCellPalette() {
       const cell = currentCell();
       document.querySelectorAll("[data-cell-preset]").forEach(btn => {
-        btn.classList.toggle("active", btn.dataset.cellPreset === cell?.type);
+        const preset = btn.dataset.cellPreset;
+        const active = preset === cell?.type
+          || (preset === "grille" && Boolean(cell?.accessories?.grille))
+          || (preset === "screen" && ((cell?.accessories?.screenMode && cell.accessories.screenMode !== "none") || (cell?.openingAssembly?.screenMode && cell.openingAssembly.screenMode !== "none")))
+          || (preset === "louver" && cell?.infillType === "louver")
+          || (preset === "panel" && cell?.infillType === "panel");
+        btn.classList.toggle("active", active);
       });
       const win = currentWindow();
       document.querySelectorAll("[data-shape-preset]").forEach(btn => {
@@ -2137,7 +2251,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         const item = rects[i];
         const cell = item.cell;
         const selected = item.row === selectedCell.row && item.col === selectedCell.col;
-        const fill = cellFill(cell.type);
+        const fill = cellFill(cell);
         const openable = isOperableType(cell.type);
         const cellPath = cellCustomShapePath(cell, item);
         const clipId = cellPath ? `cellClip-${item.row}-${item.col}` : "";
@@ -2159,7 +2273,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
             parts.push(openingSymbol(cell, item, inset));
           }
         }
-        parts.push(cellDecoration(cell.type, item, outlineColor));
+        parts.push(cellDecoration(cell, item, outlineColor));
         parts.push(integratedScreenDecoration(cell, item, outlineColor));
         if (cellPath) parts.push(`</g>`);
         parts.push(`<text class="cell-label" x="${item.x + item.w / 2}" y="${item.y + item.h / 2}">${escapeHtml(cellDrawingCode(cell.type, i))}</text>`);
@@ -2620,7 +2734,9 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     }
 
     function integratedScreenDecoration(cell, item, stroke) {
-      const mode = cell.openingAssembly?.screenMode;
+      const mode = cell.openingAssembly?.screenMode && cell.openingAssembly.screenMode !== "none"
+        ? cell.openingAssembly.screenMode
+        : normalizeCellAccessories(cell.accessories).screenMode;
       if (!mode || mode === "none") return "";
       const inset = Math.max(8, Math.min(item.w, item.h) * 0.08);
       const left = item.x + inset;
@@ -3586,7 +3702,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return "#8f9ba0";
     }
 
-    function cellFill(type) {
+    function cellFill(cellOrType) {
+      const type = typeof cellOrType === "string" ? cellOrType : cellOrType?.type;
+      const infillType = typeof cellOrType === "string" ? "glass" : normalizeCellInfillType(cellOrType?.infillType);
+      if (infillType === "panel") return "var(--panel)";
+      if (infillType === "louver") return "var(--louver)";
       return {
         fixed_glass: "var(--glass)",
         turn: "#cfe7f1",
@@ -3611,10 +3731,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       }[type] || "var(--glass)";
     }
 
-    function cellDecoration(type, item, stroke) {
+    function cellDecoration(cellOrType, item, stroke) {
+      const type = typeof cellOrType === "string" ? cellOrType : cellOrType?.type;
+      const infillType = typeof cellOrType === "string" ? type : normalizeCellInfillType(cellOrType?.infillType);
+      const accessories = typeof cellOrType === "string" ? normalizeCellAccessories() : normalizeCellAccessories(cellOrType?.accessories);
       const lines = [];
       const inset = Math.max(8, Math.min(item.w, item.h) * 0.08);
-      if (type === "screen") {
+      if (type === "screen" || accessories.screenMode !== "none") {
         const step = Math.max(16, Math.min(item.w, item.h) / 6);
         for (let x = item.x + inset; x < item.x + item.w - inset; x += step) {
           lines.push(`<line class="screen-line" x1="${x}" y1="${item.y + inset}" x2="${x}" y2="${item.y + item.h - inset}" stroke="#3ba47b" stroke-width="1" opacity="0.55" />`);
@@ -3623,18 +3746,27 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           lines.push(`<line class="screen-line" x1="${item.x + inset}" y1="${y}" x2="${item.x + item.w - inset}" y2="${y}" stroke="#3ba47b" stroke-width="1" opacity="0.55" />`);
         }
       }
-      if (type === "louver") {
+      if (type === "louver" || infillType === "louver") {
         const count = Math.max(4, Math.min(9, Math.floor(item.h / 34)));
         for (let i = 1; i <= count; i += 1) {
           const y = item.y + item.h * i / (count + 1);
           lines.push(`<line class="louver-line" x1="${item.x + inset}" y1="${y}" x2="${item.x + item.w - inset}" y2="${y - 8}" stroke="${stroke}" stroke-width="4" opacity="0.7" />`);
         }
       }
-      if (type === "grille") {
+      if (type === "grille" || accessories.grille) {
         const cx = item.x + item.w / 2;
         const cy = item.y + item.h / 2;
         lines.push(`<line class="grille-line" x1="${cx}" y1="${item.y + inset}" x2="${cx}" y2="${item.y + item.h - inset}" stroke="${stroke}" stroke-width="5" opacity="0.76" />`);
         lines.push(`<line class="grille-line" x1="${item.x + inset}" y1="${cy}" x2="${item.x + item.w - inset}" y2="${cy}" stroke="${stroke}" stroke-width="5" opacity="0.76" />`);
+      }
+      if (accessories.securityBars) {
+        for (let index = 1; index <= 3; index += 1) {
+          const x = item.x + item.w * index / 4;
+          lines.push(`<line class="grille-line" x1="${x}" y1="${item.y + inset}" x2="${x}" y2="${item.y + item.h - inset}" stroke="#2f3b42" stroke-width="3" opacity="0.82" />`);
+        }
+      }
+      if (accessories.frosted) {
+        lines.push(`<rect x="${item.x + inset}" y="${item.y + inset}" width="${Math.max(0, item.w - inset * 2)}" height="${Math.max(0, item.h - inset * 2)}" fill="rgba(238,245,247,0.5)" />`);
       }
       return lines.join("");
     }
@@ -4626,9 +4758,21 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     function addThreeCell(parent, cell, rect, mats, meta) {
       if (!cell || cell.type === "empty") return;
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      const infillType = normalizeCellInfillType(cell.infillType);
+      if (!isOperableType(cell.type) && infillType === "panel") {
+        addBox(parent, rect.x, rect.y, 0.035, rect.w * 0.92, rect.h * 0.92, rect.depth * 0.25, mats.panel);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
+        return;
+      }
+      if (!isOperableType(cell.type) && infillType === "louver") {
+        addThreeLouvers(parent, rect, mats);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
+        return;
+      }
       if (cell.customShape && isOperableType(cell.type)) {
         addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.customShape) addThreeCustomCellGeometry(parent, cell, rect, mats);
@@ -4642,12 +4786,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         return;
       }
       if (cell.type === "louver") {
-        const count = Math.max(4, Math.min(9, Math.floor(rect.h / 0.15)));
-        for (let i = 1; i <= count; i += 1) {
-          const y = rect.y - rect.h / 2 + rect.h * i / (count + 1);
-          const slat = addBox(parent, rect.x, y, 0.07, rect.w * 0.82, rect.face * 0.22, rect.depth * 0.3, mats.profile);
-          slat.rotation.x = -0.22;
-        }
+        addThreeLouvers(parent, rect, mats);
         return;
       }
       if (cell.type === "grille") {
@@ -4687,39 +4826,80 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           target: 0
         });
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.type === "turn" || cell.type === "turn_tilt" || cell.type === "door") {
         addSideHungAssembly(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide"].includes(cell.type)) {
         addSlidingAssembly(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.type === "parallel_project") {
         addParallelProjectCell(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.type === "corner_slide") {
         addCornerSlidingAssembly(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.type === "vertical_slide") {
         addVerticalSlidingAssembly(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (cell.type === "folding") {
         addFoldingCell(parent, cell, rect, mats, meta, assembly);
         addIntegratedScreen(parent, cell, rect, mats, meta);
+        addThreeCellOverlays(parent, cell, rect, mats, assembly);
         return;
       }
       if (!cell.customShape) addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
+      addThreeCellOverlays(parent, cell, rect, mats, assembly);
+    }
+
+    function addThreeLouvers(parent, rect, mats) {
+      const count = Math.max(4, Math.min(9, Math.floor(rect.h / 0.15)));
+      for (let i = 1; i <= count; i += 1) {
+        const y = rect.y - rect.h / 2 + rect.h * i / (count + 1);
+        const slat = addBox(parent, rect.x, y, 0.07, rect.w * 0.82, rect.face * 0.22, rect.depth * 0.3, mats.profile);
+        slat.rotation.x = -0.22;
+      }
+    }
+
+    function addThreeCellOverlays(parent, cell, rect, mats, assembly) {
+      const accessories = normalizeCellAccessories(cell.accessories);
+      const infillType = normalizeCellInfillType(cell.infillType);
+      if (isOperableType(cell.type) && infillType === "panel") {
+        addBox(parent, rect.x, rect.y, 0.092, rect.w * 0.68, rect.h * 0.68, rect.depth * 0.12, mats.panel);
+      }
+      if (isOperableType(cell.type) && infillType === "louver") {
+        addThreeLouvers(parent, { ...rect, w: rect.w * 0.72, h: rect.h * 0.72 }, mats);
+      }
+      if (accessories.grille) {
+        addBox(parent, rect.x, rect.y, 0.12, rect.face * 0.14, rect.h * 0.76, rect.depth * 0.2, mats.profile);
+        addBox(parent, rect.x, rect.y, 0.12, rect.w * 0.76, rect.face * 0.14, rect.depth * 0.2, mats.profile);
+      }
+      if (accessories.securityBars) {
+        for (let index = 1; index <= 3; index += 1) {
+          const x = rect.x - rect.w * 0.32 + rect.w * 0.16 * index;
+          addBox(parent, x, rect.y, 0.135, rect.face * 0.11, rect.h * 0.8, rect.depth * 0.18, mats.hardwareDark);
+        }
+      }
+      if (accessories.frosted) {
+        addPane(parent, rect.x, rect.y, 0.11, rect.w * 0.72, rect.h * 0.72, mats.glass);
+      }
     }
 
     function addThreeCustomCellGeometry(parent, cell, rect, mats) {
@@ -5256,7 +5436,9 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
 
     function addIntegratedScreen(parent, cell, rect, mats, meta) {
       const assembly = cell.openingAssembly;
-      const mode = assembly?.screenMode;
+      const mode = assembly?.screenMode && assembly.screenMode !== "none"
+        ? assembly.screenMode
+        : normalizeCellAccessories(cell.accessories).screenMode;
       if (!mode || mode === "none") return;
       const screen = new threeLib.Group();
       const width = rect.w * 0.88;
@@ -6550,7 +6732,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       ["seriesId", "colorInside", "colorOutside", "glassTypeId", "hardwareSetId"].forEach(id => {
         bindById(id, "change", updateProductFromInputs);
       });
-      ["cellType", "opening", "cellGlass", "cellHardware", "handleHeight", "cellNote"].forEach(id => {
+      ["cellType", "opening", "cellGlass", "cellHardware", "cellInfill", "cellScreenMode", "cellAccessoryGrille", "cellAccessorySecurity", "cellAccessoryFrosted", "handleHeight", "cellNote"].forEach(id => {
         bindById(id, "change", updateCellFromInputs);
       });
       [
