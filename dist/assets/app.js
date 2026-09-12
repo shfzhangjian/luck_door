@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-33";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-33";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-34";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-34";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-33";
+} from "./openings.js?v=20260912-34";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-33";
+} from "./topology.js?v=20260912-34";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-33";
+} from "./joints.js?v=20260912-34";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-33";
+} from "./assemblies.js?v=20260912-34";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-33";
+} from "./installations.js?v=20260912-34";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2136,6 +2136,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
           if (event.key === "Enter" || event.key === " ") select();
         });
       });
+      bindCustomShapePointHandles(svg, win, x, y, drawW, drawH);
 
       document.getElementById("drawingTitle").textContent = `${win.mark} · ${win.name || ""}`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${win.widthMm}×${win.heightMm} mm · ${win.layout.columns.length}列${win.layout.rows.length}行 · ${currentSeries(win).name}`;
@@ -3481,7 +3482,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const centroid = svgPoints.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
       centroid.x /= svgPoints.length;
       centroid.y /= svgPoints.length;
-      const parts = [`<g class="shape-annotation" aria-label="DIY异形框边长与角度">`];
+      const parts = [`<g class="shape-annotation" data-shape-editor="custom_polygon" aria-label="DIY异形框边长与角度">`];
       for (let index = 0; index < svgPoints.length; index += 1) {
         const nextIndex = (index + 1) % svgPoints.length;
         const start = svgPoints[index];
@@ -3502,11 +3503,56 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         const svgPoint = svgPoints[index];
         const labelVector = outwardLabelVector(svgPoint, centroid, 24);
         const angleDeg = polygonVertexAngle(prev, current, next);
-        parts.push(`<circle class="shape-vertex-dot" cx="${svgPoint.x}" cy="${svgPoint.y}" r="3.5" />`);
+        parts.push(`<circle class="shape-vertex-dot" data-shape-point-index="${index}" cx="${svgPoint.x}" cy="${svgPoint.y}" r="5" tabindex="0" />`);
         parts.push(`<text class="shape-angle-label" x="${svgPoint.x + labelVector.x}" y="${svgPoint.y + labelVector.y}">${Math.round(angleDeg)}°</text>`);
       }
       parts.push(`</g>`);
       return parts.join("");
+    }
+
+    function bindCustomShapePointHandles(svg, win, x, y, w, h) {
+      if (normalizeWindowShape(win.shape).type !== "custom_polygon") return;
+      svg.querySelectorAll("[data-shape-point-index]").forEach(handle => {
+        handle.addEventListener("pointerdown", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const index = Number(handle.dataset.shapePointIndex);
+          handle.setPointerCapture?.(event.pointerId);
+          handle.classList.add("dragging");
+          const move = moveEvent => {
+            moveEvent.preventDefault();
+            updateCustomShapePointFromPointer(svg, win, index, moveEvent, x, y, w, h);
+            render();
+          };
+          const up = upEvent => {
+            handle.releasePointerCapture?.(upEvent.pointerId);
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            markDirty();
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up, { once: true });
+        });
+      });
+    }
+
+    function updateCustomShapePointFromPointer(svg, win, index, event, x, y, w, h) {
+      const point = svgPointFromClient(svg, event.clientX, event.clientY);
+      const points = normalizeShapePoints(win.shape.points);
+      if (!points[index]) return;
+      points[index] = {
+        x: Math.round(Math.min(100, Math.max(0, (point.x - x) / w * 100)) * 10) / 10,
+        y: Math.round(Math.min(100, Math.max(0, (point.y - y) / h * 100)) * 10) / 10
+      };
+      win.shape = normalizeWindowShape({ type: "custom_polygon", points });
+      setValue("shapePoints", formatShapePoints(win.shape.points));
+    }
+
+    function svgPointFromClient(svg, clientX, clientY) {
+      const point = svg.createSVGPoint();
+      point.x = clientX;
+      point.y = clientY;
+      return point.matrixTransform(svg.getScreenCTM().inverse());
     }
 
     function outwardLabelVector(point, centroid, distance) {

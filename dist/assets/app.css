@@ -868,7 +868,19 @@
       fill: #1677ff;
       stroke: #fff;
       stroke-width: 1.4;
-      pointer-events: none;
+      cursor: grab;
+      pointer-events: all;
+    }
+
+    .shape-vertex-dot:hover,
+    .shape-vertex-dot.dragging {
+      fill: #ff9f1a;
+      stroke: #0b5cc7;
+      stroke-width: 2;
+    }
+
+    .shape-vertex-dot.dragging {
+      cursor: grabbing;
     }
 
     .plan-side {

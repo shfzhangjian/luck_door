@@ -371,6 +371,9 @@ assert.ok(app.includes("function parseShapePointsText("), "DIY polygon frames sh
 assert.ok(app.includes("function insetPolygonTowardCentroid("), "DIY polygon frames should generate an inner frame path from the outer outline");
 assert.ok(app.includes("function renderCustomShapeAnnotations("), "DIY polygon frames should display edge lengths and vertex angles");
 assert.ok(app.includes("function polygonVertexAngle("), "DIY polygon angle labels should be derived from adjacent edges");
+assert.ok(app.includes("function bindCustomShapePointHandles("), "DIY polygon vertices should be draggable in the 2D drawing");
+assert.ok(app.includes("function updateCustomShapePointFromPointer("), "dragging a DIY vertex should write back normalized point coordinates");
+assert.ok(app.includes("function svgPointFromClient("), "DIY vertex dragging should convert browser pointer coordinates into SVG coordinates");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");
