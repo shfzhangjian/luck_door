@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-40";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-40";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-41";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-41";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-40";
+} from "./openings.js?v=20260912-41";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-40";
+} from "./topology.js?v=20260912-41";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-40";
+} from "./joints.js?v=20260912-41";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-40";
+} from "./assemblies.js?v=20260912-41";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-40";
+} from "./installations.js?v=20260912-41";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -255,6 +255,24 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return normalized.length >= 3 ? normalized : fallback;
     }
 
+    function fitShapePointsToBounds(points, fallback = []) {
+      const normalized = normalizeShapePoints(points, fallback);
+      if (normalized.length < 3) return normalized;
+      const xs = normalized.map(point => point.x);
+      const ys = normalized.map(point => point.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const spanX = maxX - minX;
+      const spanY = maxY - minY;
+      if (spanX < 0.1 || spanY < 0.1) return normalized;
+      return normalized.map(point => ({
+        x: Math.min(100, Math.max(0, Math.round(((point.x - minX) / spanX) * 1000) / 10)),
+        y: Math.min(100, Math.max(0, Math.round(((point.y - minY) / spanY) * 1000) / 10))
+      }));
+    }
+
     function parseShapePointsText(text, fallback = []) {
       const points = String(text || "")
         .split(/\s+/)
@@ -276,7 +294,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     }
 
     function normalizeCustomShapeElement(value) {
-      const points = normalizeShapePoints(value?.points);
+      const points = fitShapePointsToBounds(value?.points);
       if (points.length < 3) return null;
       return {
         shapeId: String(value?.shapeId || `DIY-${Date.now().toString(36).toUpperCase()}`),
@@ -289,7 +307,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
 
     function normalizeCellCustomShape(value) {
       if (!value) return null;
-      const points = normalizeShapePoints(value.points);
+      const points = fitShapePointsToBounds(value.points);
       if (points.length < 3) return null;
       return {
         shapeId: String(value.shapeId || ""),
@@ -4751,6 +4769,9 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         operationOrder: 0,
         width: sashWidth,
         height: sashHeight,
+        shapePoints: shapeData.points,
+        shapeWidth: sashWidth,
+        shapeHeight: sashHeight,
         travel,
         liftHeight: cell.type === "lift_slide" ? rect.h * 0.035 : 0,
         releaseDepth: ["psk", "parallel_slide", "corner_slide"].includes(cell.type) ? Math.max(0.055, rect.depth * 0.82) : 0,
@@ -5845,18 +5866,63 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       if (!THREE || !root) return;
       preview3d.selectionHelpers.forEach(helper => {
         root.remove(helper);
-        helper.geometry?.dispose?.();
-        helper.material?.dispose?.();
+        disposeThreeHelper(helper);
       });
       preview3d.selectionHelpers = selectedPreviewParts().map(part => {
-        const helper = new THREE.BoxHelper(part.object, part.key === preview3d.selectedPartKey ? 0xff9f1c : 0x1677ff);
+        const color = part.key === preview3d.selectedPartKey ? 0xff9f1c : 0x1677ff;
+        const helper = createPartSelectionHelper(part, color) || new THREE.BoxHelper(part.object, color);
         helper.userData.openableKey = part.key;
         helper.visible = part.current <= 0.001 && part.target <= 0.001 && !preview3d.playback?.active;
-        helper.material.depthTest = false;
+        helper.traverse?.(item => {
+          if (!item.material) return;
+          item.material.depthTest = false;
+        });
+        if (helper.material) helper.material.depthTest = false;
         helper.renderOrder = 20;
         root.add(helper);
         return helper;
       });
+    }
+
+    function disposeThreeHelper(helper) {
+      helper.traverse?.(item => {
+        item.geometry?.dispose?.();
+        if (Array.isArray(item.material)) item.material.forEach(material => material.dispose?.());
+        else item.material?.dispose?.();
+      });
+      helper.geometry?.dispose?.();
+      if (Array.isArray(helper.material)) helper.material.forEach(material => material.dispose?.());
+      else helper.material?.dispose?.();
+    }
+
+    function createPartSelectionHelper(part, color) {
+      const THREE = threeLib;
+      const root = preview3d.group;
+      if (!THREE || !root || !Array.isArray(part.shapePoints) || part.shapePoints.length < 3) return null;
+      const width = Number(part.shapeWidth || part.width);
+      const height = Number(part.shapeHeight || part.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+      root.updateMatrixWorld(true);
+      part.object.updateMatrixWorld(true);
+      const vertices = [];
+      const points = part.shapePoints.map(point => new THREE.Vector3(
+        -width / 2 + point.x / 100 * width,
+        height / 2 - point.y / 100 * height,
+        0.115
+      ));
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index].clone().applyMatrix4(part.object.matrixWorld);
+        const end = points[(index + 1) % points.length].clone().applyMatrix4(part.object.matrixWorld);
+        root.worldToLocal(start);
+        root.worldToLocal(end);
+        vertices.push(start.x, start.y, start.z, end.x, end.y, end.z);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+      const material = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
+      const helper = new THREE.LineSegments(geometry, material);
+      helper.userData.mountType = "diy-shape-selection";
+      return helper;
     }
 
     function threePartKeyAt(event) {
