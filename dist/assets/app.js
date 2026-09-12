@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-30";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-30";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-31";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-31";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-30";
+} from "./openings.js?v=20260912-31";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-30";
+} from "./topology.js?v=20260912-31";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-30";
+} from "./joints.js?v=20260912-31";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-30";
+} from "./assemblies.js?v=20260912-31";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,11 +60,21 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-30";
+} from "./installations.js?v=20260912-31";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
 const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
+const SHAPE_PRESETS = Object.freeze([
+  { type: "rectangular", label: "四边框", icon: "□", description: "标准矩形洞口和窗框" },
+  { type: "arched", label: "上拱框", icon: "⌒", description: "顶部拱形固定或组合窗" },
+  { type: "trapezoid", label: "右斜顶框", icon: "⌿", description: "右侧斜顶或平行四边形外框" },
+  { type: "trapezoid_left", label: "左斜顶框", icon: "⍀", description: "左侧斜顶或反向平行四边形外框" },
+  { type: "trapezoid_peak", label: "双斜顶框", icon: "⌂", description: "顶部双坡/尖顶异形框" },
+  { type: "notch_top_left", label: "左上缺角框", icon: "┌", description: "左上角让位的 L 形外框" },
+  { type: "notch_top_right", label: "右上缺角框", icon: "┐", description: "右上角让位的 L 形外框" }
+]);
+const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(item => [item.type, item])));
 
     let project = loadProject();
     let selectedWindowId = project.windows[0]?.windowId || "";
@@ -201,12 +211,24 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
           sillHeightMm: Math.max(0, Number(overrides.installation?.sillHeightMm ?? overrides.sillHeightMm ?? 0)),
           surround: normalizeSurround(overrides.installation?.surround)
         },
-        shape: overrides.shape || { type: "rectangular", archHeightMm: 0 },
+        shape: normalizeWindowShape(overrides.shape),
         geometryMode: overrides.geometryMode === "topology" || overrides.topology?.members?.length ? "topology" : "grid",
         layout,
         topology: normalizeTopology(overrides.topology, layout),
         notes: overrides.notes || ""
       };
+    }
+
+    function normalizeWindowShape(value = {}) {
+      const type = SHAPE_PRESET_BY_TYPE[value?.type] ? value.type : "rectangular";
+      return {
+        type,
+        archHeightMm: type === "arched" ? Math.max(120, Math.round(Number(value.archHeightMm) || 220)) : 0
+      };
+    }
+
+    function shapeLabel(type) {
+      return SHAPE_PRESET_BY_TYPE[type]?.label || SHAPE_PRESET_BY_TYPE.rectangular.label;
     }
 
     function createCell(type = "fixed_glass", opening = "") {
@@ -294,7 +316,7 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
             sillHeightMm: Math.max(0, Number(w.installation?.sillHeightMm ?? w.sillHeightMm ?? 0)),
             surround: normalizeSurround(w.installation?.surround)
           },
-          shape: w.shape || { type: "rectangular", archHeightMm: 0 },
+          shape: normalizeWindowShape(w.shape),
           geometryMode: w.geometryMode === "topology" || w.topology?.members?.length ? "topology" : "grid",
           layout,
           topology: normalizeTopology(w.topology, layout)
@@ -459,8 +481,10 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       win.heightMm = Math.max(300, Number(valueOf("winHeight") || 1500));
       win.floor = valueOf("winFloor");
       win.room = valueOf("winRoom");
-      win.shape.type = valueOf("winShape");
-      win.shape.archHeightMm = Math.max(0, Number(valueOf("archHeight") || 0));
+      win.shape = normalizeWindowShape({
+        type: valueOf("winShape"),
+        archHeightMm: Math.max(0, Number(valueOf("archHeight") || 0))
+      });
       win.installation ||= { sillHeightMm: 0 };
       win.installation.sillHeightMm = Math.max(0, Number(valueOf("sillHeight") || 0));
       markDirty();
@@ -791,14 +815,16 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const win = currentWindow();
       if (!win) return;
       win.shape = {
-        type,
-        archHeightMm: type === "arched" ? Math.max(220, Number(win.shape?.archHeightMm || 0)) : 0
+        ...normalizeWindowShape({
+          type,
+          archHeightMm: type === "arched" ? Math.max(220, Number(win.shape?.archHeightMm || 0)) : 0
+        })
       };
       selectedMemberId = "";
       selectedJointId = "";
       switchInspector("window");
       markDirty();
-      showToast(`整窗外形已设为${type === "arched" ? "上拱框" : type === "trapezoid" ? "斜顶框" : "四边框"}。`);
+      showToast(`整窗外形已设为${shapeLabel(type)}。`);
     }
 
     function addLocalMember(orientation) {
@@ -1415,7 +1441,7 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       setValue("sillHeight", win.installation?.sillHeightMm || 0);
       setValue("winFloor", win.floor || "");
       setValue("winRoom", win.room || "");
-      setValue("winShape", win.shape.type || "rectangular");
+      renderSelect("winShape", SHAPE_PRESETS.map(item => [item.type, item.label]), win.shape.type || "rectangular");
       setValue("archHeight", win.shape.archHeightMm || 0);
       renderSelect("seriesId", project.catalog.profileSystems.map(s => [s.id, `${s.id} · ${s.name}`]), win.seriesId);
       renderSelect("glassTypeId", project.catalog.glassTypes.map(g => [g.id, g.name]), win.defaultGlassTypeId);
@@ -1539,6 +1565,17 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
         ["默认五金", hardware?.name || win.defaultHardwareSetId],
         ["安装包套", win.installation?.surround?.enabled ? surroundSummary(win.installation.surround, win.widthMm, win.heightMm).style : "未启用"]
       ].map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></li>`).join("");
+      renderDesignerCapabilitySummary();
+    }
+
+    function renderDesignerCapabilitySummary() {
+      const operableNames = OPERABLE_TYPES.map(type => typeLabels[type] || type);
+      document.getElementById("designerCapabilitySummary").innerHTML = [
+        ["外框预设", SHAPE_PRESETS.map(item => item.label).join("、")],
+        ["开启窗型", operableNames.join("、")],
+        ["填充构件", ["固定玻璃", "纱窗", "百叶", "格条", "面板", "留空"].join("、")],
+        ["下一阶段", "拖点异形框、自由角度尺寸链、异形 3D 洞口"]
+      ].map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></li>`).join("");
     }
 
     function renderInstallationInputs(win) {
@@ -3124,19 +3161,57 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const innerY = y + face;
       const innerW = w - face * 2;
       const innerH = h - face * 2;
-      if (win.shape.type === "arched") {
+      const shapeType = normalizeWindowShape(win.shape).type;
+      if (shapeType === "arched") {
         const rise = Math.min(h * 0.32, Math.max(face * 1.2, Number(win.shape.archHeightMm || 220) * (w / win.widthMm)));
         const outer = `M${x} ${y + rise} Q${x + w / 2} ${y - rise * 0.75} ${x + w} ${y + rise} L${x + w} ${y + h} L${x} ${y + h} Z`;
         const inner = `M${innerX} ${innerY + rise * 0.72} Q${x + w / 2} ${innerY - rise * 0.45} ${innerX + innerW} ${innerY + rise * 0.72} L${innerX + innerW} ${innerY + innerH} L${innerX} ${innerY + innerH} Z`;
         return `${outer} ${inner}`;
       }
-      if (win.shape.type === "trapezoid") {
+      if (shapeType === "trapezoid") {
         const shift = Math.min(w * 0.18, 90);
-        const outer = `M${x + shift} ${y} L${x + w} ${y} L${x + w - shift} ${y + h} L${x} ${y + h} Z`;
-        const inner = `M${innerX + shift * 0.75} ${innerY} L${innerX + innerW} ${innerY} L${innerX + innerW - shift * 0.75} ${innerY + innerH} L${innerX} ${innerY + innerH} Z`;
-        return `${outer} ${inner}`;
+        return polygonFramePath(
+          [[x + shift, y], [x + w, y], [x + w - shift, y + h], [x, y + h]],
+          [[innerX + shift * 0.75, innerY], [innerX + innerW, innerY], [innerX + innerW - shift * 0.75, innerY + innerH], [innerX, innerY + innerH]]
+        );
+      }
+      if (shapeType === "trapezoid_left") {
+        const shift = Math.min(w * 0.18, 90);
+        return polygonFramePath(
+          [[x, y], [x + w - shift, y], [x + w, y + h], [x + shift, y + h]],
+          [[innerX, innerY], [innerX + innerW - shift * 0.75, innerY], [innerX + innerW, innerY + innerH], [innerX + shift * 0.75, innerY + innerH]]
+        );
+      }
+      if (shapeType === "trapezoid_peak") {
+        const peak = Math.min(h * 0.3, Math.max(face * 1.5, 110));
+        return polygonFramePath(
+          [[x, y + peak], [x + w * 0.5, y], [x + w, y + peak], [x + w, y + h], [x, y + h]],
+          [[innerX, innerY + peak * 0.72], [x + w * 0.5, innerY], [innerX + innerW, innerY + peak * 0.72], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]]
+        );
+      }
+      if (shapeType === "notch_top_left") {
+        const notch = Math.min(w * 0.28, h * 0.32, 130);
+        return polygonFramePath(
+          [[x + notch, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y + notch]],
+          [[innerX + notch * 0.72, innerY], [innerX + innerW, innerY], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH], [innerX, innerY + notch * 0.72]]
+        );
+      }
+      if (shapeType === "notch_top_right") {
+        const notch = Math.min(w * 0.28, h * 0.32, 130);
+        return polygonFramePath(
+          [[x, y], [x + w - notch, y], [x + w, y + notch], [x + w, y + h], [x, y + h]],
+          [[innerX, innerY], [innerX + innerW - notch * 0.72, innerY], [innerX + innerW, innerY + notch * 0.72], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]]
+        );
       }
       return `M${x} ${y}h${w}v${h}h-${w}Z M${innerX} ${innerY}v${innerH}h${innerW}v-${innerH}Z`;
+    }
+
+    function polygonFramePath(outer, inner) {
+      return `${polygonPath(outer)} ${polygonPath(inner)}`;
+    }
+
+    function polygonPath(points) {
+      return points.map(([px, py], index) => `${index === 0 ? "M" : "L"}${px} ${py}`).join(" ") + " Z";
     }
 
     function computeCellRects(win, inner) {
@@ -5470,6 +5545,7 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
               edgeModes: SURROUND_EDGE_OPTIONS.map(item => ({ ...item })),
               ownership: "window"
             },
+            shapePresets: SHAPE_PRESETS.map(item => ({ ...item })),
             operableTypes: [...OPERABLE_TYPES],
             openingOptions: Object.fromEntries(
               Object.keys(typeLabels).map(type => [type, openingOptionsForType(type).map(item => ({ ...item }))])

@@ -364,6 +364,9 @@ assert.ok(app.includes("function buildPlanOpeningParts("), "the plan view should
 assert.ok(app.includes('data-plan-panel="${label}"'), "the plan should expose each projected sash as a distinct drawing element");
 assert.ok(app.includes("function renderPlanMotionGuide("), "the plan should show a clear motion guide from closed position to opened position");
 assert.ok(app.includes('marker-end="url(#planMotionArrow)"'), "the plan opening guide should include a direction arrow");
+assert.ok(app.includes("const SHAPE_PRESETS = Object.freeze"), "the designer should maintain a single supported-shape catalog");
+assert.ok(app.includes("function normalizeWindowShape("), "window shape data should be normalized before drawing or saving");
+assert.ok(app.includes("function polygonFramePath("), "custom shape presets should render as real frame paths instead of inert buttons");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");

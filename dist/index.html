@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-30" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-31" />
   <script type="importmap">
     {
       "imports": {
@@ -66,12 +66,16 @@
               </div>
             </section>
 
-            <section class="tool-section" data-tool-group="画框 四边框 上拱框 斜顶框">
+            <section class="tool-section" data-tool-group="画框 四边框 上拱框 斜顶框 双斜顶 缺角框 异形">
               <div class="tool-section-head"><h3>框</h3><span>整窗外形</span></div>
               <div class="palette-grid compact">
                 <button class="palette-tile" data-shape-preset="rectangular"><span>□</span><strong>四边框</strong></button>
                 <button class="palette-tile" data-shape-preset="arched"><span>⌒</span><strong>上拱框</strong></button>
-                <button class="palette-tile" data-shape-preset="trapezoid"><span>⌿</span><strong>斜顶框</strong></button>
+                <button class="palette-tile" data-shape-preset="trapezoid"><span>⌿</span><strong>右斜顶框</strong></button>
+                <button class="palette-tile" data-shape-preset="trapezoid_left"><span>⍀</span><strong>左斜顶框</strong></button>
+                <button class="palette-tile" data-shape-preset="trapezoid_peak"><span>⌂</span><strong>双斜顶框</strong></button>
+                <button class="palette-tile" data-shape-preset="notch_top_left"><span>┌</span><strong>左上缺角框</strong></button>
+                <button class="palette-tile" data-shape-preset="notch_top_right"><span>┐</span><strong>右上缺角框</strong></button>
               </div>
             </section>
 
@@ -315,7 +319,11 @@
                 <select id="winShape">
                   <option value="rectangular">矩形</option>
                   <option value="arched">上拱</option>
-                  <option value="trapezoid">斜顶</option>
+                  <option value="trapezoid">右斜顶</option>
+                  <option value="trapezoid_left">左斜顶</option>
+                  <option value="trapezoid_peak">双斜顶</option>
+                  <option value="notch_top_left">左上缺角</option>
+                  <option value="notch_top_right">右上缺角</option>
                 </select>
               </label>
               <label>上拱高度 mm<input id="archHeight" type="number" min="0" step="10" /></label>
@@ -324,6 +332,10 @@
           <section class="section inspector-summary">
             <h2>产品摘要</h2>
             <ul id="inspectorProductSummary" class="mini-list"></ul>
+          </section>
+          <section class="section inspector-summary">
+            <h2>窗型能力</h2>
+            <ul id="designerCapabilitySummary" class="mini-list"></ul>
           </section>
         </div>
 
@@ -864,6 +876,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-30"></script>
+  <script type="module" src="assets/app.js?v=20260912-31"></script>
 </body>
 </html>

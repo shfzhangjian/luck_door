@@ -1925,6 +1925,16 @@
       padding-bottom: 6px;
     }
 
+    .mini-list li span {
+      flex: 0 0 auto;
+    }
+
+    .mini-list li strong {
+      min-width: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
     .toast {
       position: fixed;
       right: 16px;
