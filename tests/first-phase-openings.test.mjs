@@ -390,6 +390,8 @@ assert.ok(app.includes("function cellCustomShapePath("), "2D elevations should r
 assert.ok(app.includes("function addThreeCustomCellGeometry("), "3D preview should build profile and glass geometry from the DIY cell outline");
 assert.ok(app.includes("function addThreeCustomOperableCell("), "3D preview should animate the DIY outline itself when the cell is operable");
 assert.ok(app.includes("function addThreeCustomCellWallOpenings("), "3D wall openings should be filled back around cell-level DIY outlines");
+assert.ok(app.includes("function addThreeSegmentedOuterFrame("), "3D outer frames should skip rectangular rails around cell-level DIY outlines");
+assert.ok(app.includes("function addThreeGridFrameMembers("), "3D grid mullions should be segmented around cell-level DIY outlines");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");

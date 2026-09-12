@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-39";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-39";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-40";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-40";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-39";
+} from "./openings.js?v=20260912-40";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-39";
+} from "./topology.js?v=20260912-40";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-39";
+} from "./joints.js?v=20260912-40";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-39";
+} from "./assemblies.js?v=20260912-40";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-39";
+} from "./installations.js?v=20260912-40";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2160,10 +2160,20 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const colEdges = rectsToEdges(win.layout.columns, inner.x, inner.w);
       const rowEdges = rectsToEdges(win.layout.rows, inner.y, inner.h);
       for (let c = 1; c < colEdges.length - 1; c += 1) {
-        parts.push(`<rect x="${colEdges[c] - face / 2}" y="${inner.y}" width="${face}" height="${inner.h}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+        for (let r = 0; r < win.layout.rows.length; r += 1) {
+          if (cellHasCustomShape(win, r, c - 1) || cellHasCustomShape(win, r, c)) continue;
+          const bottom = rowEdges[r];
+          const top = rowEdges[r + 1];
+          parts.push(`<rect x="${colEdges[c] - face / 2}" y="${bottom}" width="${face}" height="${top - bottom}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+        }
       }
       for (let r = 1; r < rowEdges.length - 1; r += 1) {
-        parts.push(`<rect x="${inner.x}" y="${rowEdges[r] - face / 2}" width="${inner.w}" height="${face}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+        const aboveRow = r - 1;
+        const belowRow = r;
+        for (let c = 0; c < win.layout.columns.length; c += 1) {
+          if (cellHasCustomShape(win, aboveRow, c) || cellHasCustomShape(win, belowRow, c)) continue;
+          parts.push(`<rect x="${colEdges[c]}" y="${rowEdges[r] - face / 2}" width="${colEdges[c + 1] - colEdges[c]}" height="${face}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+        }
       }
 
       parts.push(renderTopologyMembers(win, rects, face, dividerColor, outlineColor));
@@ -3484,6 +3494,16 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return normalizeWindowShape(win.shape).type === "rectangular";
     }
 
+    function cellHasCustomShape(win, row, col) {
+      const cols = win?.layout?.columns?.length || 0;
+      if (row < 0 || col < 0 || !cols) return false;
+      return Boolean(normalizeCellCustomShape(win.layout.cells[cellIndex(row, col, cols)]?.customShape));
+    }
+
+    function windowHasCustomCellShape(win) {
+      return Boolean(win?.layout?.cells?.some(cell => normalizeCellCustomShape(cell?.customShape)));
+    }
+
     function insetPolygonTowardCentroid(points, inset) {
       if (!points.length) return [];
       const center = points.reduce((acc, [px, py]) => ({ x: acc.x + px, y: acc.y + py }), { x: 0, y: 0 });
@@ -4350,13 +4370,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         addShowroomOpening(wallHost, width, height, face, depth, mats, win, scale, cornerMount, showOrientationLabels);
         addThreeCustomCellWallOpenings(wallHost, win, colEdges, rowEdges, face, depth, mats, scale, cornerMount);
       }
-      addMountedOuterFrame(frameMount, win, width, height, face, depth, mats, cornerMount);
-      for (let c = 1; c < colEdges.length - 1; c += 1) {
-        addBox(frameMount, colEdges[c], 0, 0.01, face * 0.82, innerH, depth * 0.92, mats.profile);
-      }
-      for (let r = 1; r < rowEdges.length - 1; r += 1) {
-        addBox(frameMount, 0, rowEdges[r], 0.01, innerW, face * 0.82, depth * 0.92, mats.profile);
-      }
+      addMountedOuterFrame(frameMount, win, width, height, face, depth, mats, cornerMount, colEdges, rowEdges);
+      addThreeGridFrameMembers(frameMount, win, colEdges, rowEdges, innerW, innerH, face, depth, mats);
 
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
@@ -4420,10 +4435,14 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       };
     }
 
-    function addMountedOuterFrame(parent, win, width, height, face, depth, mats, cornerMount) {
+    function addMountedOuterFrame(parent, win, width, height, face, depth, mats, cornerMount, colEdges = [], rowEdges = []) {
       if (!cornerMount) {
         if (!isRectangularWindowShape(win)) {
           addThreeShapeFrame(parent, windowShapePoints3d(win, width, height), face, depth, mats.profile);
+          return;
+        }
+        if (windowHasCustomCellShape(win) && colEdges.length && rowEdges.length) {
+          addThreeSegmentedOuterFrame(parent, win, colEdges, rowEdges, width, height, face, depth, mats.profile);
           return;
         }
         addBox(parent, 0, height / 2 - face / 2, 0, width, face, depth, mats.profile);
@@ -4451,6 +4470,54 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       }
       addBox(returnFrame, cornerMount.returnSpan - face / 2, 0, 0, face, height, depth, mats.profile);
       parent.add(returnFrame);
+    }
+
+    function addThreeSegmentedOuterFrame(parent, win, colEdges, rowEdges, width, height, face, depth, material) {
+      const cols = win.layout.columns.length;
+      const rows = win.layout.rows.length;
+      for (let col = 0; col < cols; col += 1) {
+        const centerX = (colEdges[col] + colEdges[col + 1]) / 2;
+        const segmentW = colEdges[col + 1] - colEdges[col];
+        if (!cellHasCustomShape(win, 0, col)) {
+          addBox(parent, centerX, height / 2 - face / 2, 0, segmentW, face, depth, material);
+        }
+        if (!cellHasCustomShape(win, rows - 1, col)) {
+          addBox(parent, centerX, -height / 2 + face / 2, 0, segmentW, face, depth, material);
+        }
+      }
+      for (let row = 0; row < rows; row += 1) {
+        const bottom = rowEdges[rows - row - 1];
+        const top = rowEdges[rows - row];
+        const centerY = (bottom + top) / 2;
+        const segmentH = top - bottom;
+        if (!cellHasCustomShape(win, row, 0)) {
+          addBox(parent, -width / 2 + face / 2, centerY, 0, face, segmentH, depth, material);
+        }
+        if (!cellHasCustomShape(win, row, cols - 1)) {
+          addBox(parent, width / 2 - face / 2, centerY, 0, face, segmentH, depth, material);
+        }
+      }
+    }
+
+    function addThreeGridFrameMembers(parent, win, colEdges, rowEdges, innerW, innerH, face, depth, mats) {
+      const cols = win.layout.columns.length;
+      const rows = win.layout.rows.length;
+      for (let col = 1; col < colEdges.length - 1; col += 1) {
+        for (let row = 0; row < rows; row += 1) {
+          if (cellHasCustomShape(win, row, col - 1) || cellHasCustomShape(win, row, col)) continue;
+          const bottom = rowEdges[rows - row - 1];
+          const top = rowEdges[rows - row];
+          addBox(parent, colEdges[col], (bottom + top) / 2, 0.01, face * 0.82, top - bottom, depth * 0.92, mats.profile);
+        }
+      }
+      for (let edge = 1; edge < rowEdges.length - 1; edge += 1) {
+        const aboveRow = rows - edge - 1;
+        const belowRow = rows - edge;
+        for (let col = 0; col < cols; col += 1) {
+          if (cellHasCustomShape(win, aboveRow, col) || cellHasCustomShape(win, belowRow, col)) continue;
+          addBox(parent, (colEdges[col] + colEdges[col + 1]) / 2, rowEdges[edge], 0.01, colEdges[col + 1] - colEdges[col], face * 0.82, depth * 0.92, mats.profile);
+        }
+      }
     }
 
     function addThreeShapeFrame(parent, points, face, depth, material) {
