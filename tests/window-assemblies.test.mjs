@@ -153,6 +153,8 @@ const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8"
 assert.ok(html.includes('id="shapePoints"'), "DIY polygon frames should expose editable point coordinates");
 assert.ok(html.includes('id="diyShapeDialog"'), "DIY polygon frames should open a dedicated modeling dialog");
 assert.ok(html.includes('id="diyShapeCanvas"'), "DIY polygon frames should provide a blank drawing canvas");
-assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save the drawn model as a shape element");
+assert.ok(html.includes('id="diyShapeName"'), "DIY polygon frames should require a user-provided saved element name");
+assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save the drawn model as a named shape element");
+assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames should appear in the drawing tool library");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");

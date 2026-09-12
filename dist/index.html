@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-35" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-36" />
   <script type="importmap">
     {
       "imports": {
@@ -78,6 +78,7 @@
                 <button class="palette-tile" data-shape-preset="notch_top_right"><span>┐</span><strong>右上缺角框</strong></button>
                 <button class="palette-tile" data-shape-preset="custom_polygon"><span>DIY</span><strong>DIY异形框</strong></button>
               </div>
+              <div id="customShapeLibrary" class="custom-shape-library" aria-label="已保存DIY窗型"></div>
             </section>
 
             <section class="tool-section" data-tool-group="中梃 竖梃 横梃 局部梃 等分 分格">
@@ -861,6 +862,12 @@
             <p id="diyShapeStatus">点击画布添加第一个点</p>
           </section>
           <section>
+            <h3>保存名称</h3>
+            <label class="diy-name-field">名称
+              <input id="diyShapeName" type="text" maxlength="40" placeholder="例如：异C1" />
+            </label>
+          </section>
+          <section>
             <h3>操作</h3>
             <button id="btnUndoDiyPoint" type="button">撤销点</button>
             <button id="btnClearDiyShape" type="button">清空画布</button>
@@ -908,6 +915,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-35"></script>
+  <script type="module" src="assets/app.js?v=20260912-36"></script>
 </body>
 </html>

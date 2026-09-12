@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-35";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-35";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-36";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-36";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-35";
+} from "./openings.js?v=20260912-36";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-35";
+} from "./topology.js?v=20260912-36";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-35";
+} from "./joints.js?v=20260912-36";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-35";
+} from "./assemblies.js?v=20260912-36";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-35";
+} from "./installations.js?v=20260912-36";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -94,7 +94,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     const diyShapeEditor = {
       points: [],
       selectedIndex: -1,
-      draggingIndex: -1
+      draggingIndex: -1,
+      closed: false
     };
     let threeLib = null;
     let orbitControlsLib = null;
@@ -897,6 +898,18 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       showToast(`整窗外形已设为${shapeLabel(type)}。`);
     }
 
+    function applyCustomShapeElement(shapeId) {
+      const win = currentWindow();
+      const item = project.customShapes?.find(shape => shape.shapeId === shapeId);
+      if (!win || !item) return;
+      win.shape = normalizeWindowShape({ type: "custom_polygon", points: item.points });
+      selectedMemberId = "";
+      selectedJointId = "";
+      switchInspector("window");
+      markDirty();
+      showToast(`已应用DIY窗型：${item.name}`);
+    }
+
     function addLocalMember(orientation) {
       const win = currentWindow();
       if (!win) return;
@@ -1487,6 +1500,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       renderInputs();
       renderSvg();
       renderCellPalette();
+      renderCustomShapeLibrary();
       if (activeModule === "preview") renderThreePreview();
       renderWindowCards();
       renderTemplates();
@@ -1979,6 +1993,24 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       document.querySelectorAll("[data-shape-preset]").forEach(btn => {
         btn.classList.toggle("active", btn.dataset.shapePreset === win?.shape?.type);
       });
+    }
+
+    function renderCustomShapeLibrary() {
+      const container = document.getElementById("customShapeLibrary");
+      if (!container) return;
+      container.innerHTML = (project.customShapes || []).map(shape => `
+        <button class="custom-shape-item" data-custom-shape="${escapeHtml(shape.shapeId)}" title="${escapeHtml(shape.name)}">
+          ${renderCustomShapeThumb(shape.points)}
+          <strong>${escapeHtml(shape.name)}</strong>
+        </button>
+      `).join("");
+    }
+
+    function renderCustomShapeThumb(points) {
+      const normalized = normalizeShapePoints(points);
+      if (normalized.length < 3) return "";
+      const path = normalized.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
+      return `<svg viewBox="-6 -6 112 112" aria-hidden="true"><path d="${path} Z" fill="rgba(187,225,238,0.55)" stroke="#20383e" stroke-width="5" vector-effect="non-scaling-stroke" /></svg>`;
     }
 
     function renderSvg() {
@@ -3548,12 +3580,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     }
 
     function openDiyShapeEditor(options = {}) {
-      const win = currentWindow();
-      if (!win) return;
-      const currentPoints = win.shape?.type === "custom_polygon" ? normalizeShapePoints(win.shape.points) : [];
-      diyShapeEditor.points = options.blank ? [] : currentPoints.map(point => ({ ...point }));
-      diyShapeEditor.selectedIndex = diyShapeEditor.points.length ? diyShapeEditor.points.length - 1 : -1;
+      diyShapeEditor.points = Array.isArray(options.points) ? normalizeShapePoints(options.points).map(point => ({ ...point })) : [];
+      diyShapeEditor.selectedIndex = -1;
       diyShapeEditor.draggingIndex = -1;
+      diyShapeEditor.closed = false;
+      setValue("diyShapeName", "");
       renderDiyShapeEditor();
       const dialog = document.getElementById("diyShapeDialog");
       if (dialog?.showModal && !dialog.open) dialog.showModal();
@@ -3571,6 +3602,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       if (!svg) return;
       const bounds = diyShapeBounds();
       const parts = [];
+      parts.push(`<defs><marker id="diyDimTick" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M4 0 L4 8" stroke="#596bd4" stroke-width="1.4" /></marker></defs>`);
       parts.push(`<rect class="diy-work-area" x="${bounds.x}" y="${bounds.y}" width="${bounds.w}" height="${bounds.h}" rx="2" />`);
       for (let i = 1; i < 10; i += 1) {
         const gx = bounds.x + bounds.w * i / 10;
@@ -3579,12 +3611,13 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         parts.push(`<line class="diy-grid-line" x1="${bounds.x}" y1="${gy}" x2="${bounds.x + bounds.w}" y2="${gy}" />`);
       }
       const svgPoints = diyShapeEditor.points.map(point => diyPointToSvg(point, bounds));
-      if (svgPoints.length >= 3) {
+      if (svgPoints.length >= 3 && diyShapeEditor.closed) {
         const path = svgPoints.map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`).join(" ");
         parts.push(`<path class="diy-shape-path" d="${path} Z" />`);
       } else if (svgPoints.length >= 2) {
         parts.push(`<polyline class="diy-shape-preview-line" points="${svgPoints.map(point => `${point.x},${point.y}`).join(" ")}" />`);
       }
+      if (svgPoints.length >= 2) parts.push(renderDiyShapeDimensions(diyShapeEditor.points, svgPoints, diyShapeEditor.closed));
       svgPoints.forEach((point, index) => {
         const active = index === diyShapeEditor.selectedIndex ? " active" : "";
         parts.push(`<circle class="diy-shape-point${active}" data-diy-point-index="${index}" cx="${point.x}" cy="${point.y}" r="7" />`);
@@ -3597,9 +3630,52 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       if (status) {
         const count = diyShapeEditor.points.length;
         status.textContent = count < 3
-          ? `已绘制 ${count} 个点，还需要至少 ${3 - count} 个点才能保存。`
-          : `已绘制 ${count} 个点，可继续拖动调整，或保存为窗型元素。`;
+          ? `已绘制 ${count} 个点，还需要至少 ${3 - count} 个点才能闭合。`
+          : diyShapeEditor.closed
+            ? `已闭合为 ${count} 边形，可输入名称并保存到工具库。`
+            : `已绘制 ${count} 个点，点击第一个点闭合成面。`;
       }
+    }
+
+    function renderDiyShapeDimensions(modelPoints, svgPoints, closed) {
+      const parts = [];
+      const segmentCount = closed ? svgPoints.length : svgPoints.length - 1;
+      const centroid = svgPoints.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+      centroid.x /= svgPoints.length;
+      centroid.y /= svgPoints.length;
+      for (let index = 0; index < segmentCount; index += 1) {
+        const nextIndex = (index + 1) % svgPoints.length;
+        const start = svgPoints[index];
+        const end = svgPoints[nextIndex];
+        const modelStart = modelPoints[index];
+        const modelEnd = modelPoints[nextIndex];
+        const lengthMm = Math.hypot(modelEnd.x - modelStart.x, modelEnd.y - modelStart.y) * 24;
+        const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+        const outward = outwardLabelVector(mid, centroid, 16);
+        const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI;
+        parts.push(`<text class="diy-dimension" x="${mid.x + outward.x}" y="${mid.y + outward.y}" transform="rotate(${angle} ${mid.x + outward.x} ${mid.y + outward.y})">${Math.round(lengthMm)} mm</text>`);
+      }
+      if (closed) {
+        for (let index = 0; index < svgPoints.length; index += 1) {
+          const prev = modelPoints[(index - 1 + modelPoints.length) % modelPoints.length];
+          const current = modelPoints[index];
+          const next = modelPoints[(index + 1) % modelPoints.length];
+          const point = svgPoints[index];
+          const labelVector = outwardLabelVector(point, centroid, 26);
+          parts.push(`<text class="diy-angle" x="${point.x + labelVector.x}" y="${point.y + labelVector.y}">${Math.round(polygonVertexAngle(prev, current, next))}°</text>`);
+        }
+        const minX = Math.min(...svgPoints.map(point => point.x));
+        const maxX = Math.max(...svgPoints.map(point => point.x));
+        const minY = Math.min(...svgPoints.map(point => point.y));
+        const maxY = Math.max(...svgPoints.map(point => point.y));
+        const widthMm = (Math.max(...modelPoints.map(point => point.x)) - Math.min(...modelPoints.map(point => point.x))) * 24;
+        const heightMm = (Math.max(...modelPoints.map(point => point.y)) - Math.min(...modelPoints.map(point => point.y))) * 24;
+        parts.push(`<line class="diy-overall-guide" x1="${minX}" y1="${maxY + 30}" x2="${maxX}" y2="${maxY + 30}" />`);
+        parts.push(`<text class="diy-overall-dimension" x="${(minX + maxX) / 2}" y="${maxY + 50}">${Math.round(widthMm)} mm</text>`);
+        parts.push(`<line class="diy-overall-guide" x1="${maxX + 28}" y1="${minY}" x2="${maxX + 28}" y2="${maxY}" />`);
+        parts.push(`<text class="diy-overall-dimension" x="${maxX + 50}" y="${(minY + maxY) / 2}" transform="rotate(-90 ${maxX + 50} ${(minY + maxY) / 2})">${Math.round(heightMm)} mm</text>`);
+      }
+      return parts.join("");
     }
 
     function diyShapeBounds() {
@@ -3626,9 +3702,16 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const index = Number(event.target?.dataset?.diyPointIndex);
       const point = diyPointFromSvg(svgPointFromClient(svg, event.clientX, event.clientY));
       if (Number.isInteger(index) && index >= 0) {
+        if (index === 0 && diyShapeEditor.points.length >= 3 && !diyShapeEditor.closed) {
+          diyShapeEditor.selectedIndex = 0;
+          diyShapeEditor.draggingIndex = -1;
+          diyShapeEditor.closed = true;
+          renderDiyShapeEditor();
+          return;
+        }
         diyShapeEditor.selectedIndex = index;
         diyShapeEditor.draggingIndex = index;
-      } else {
+      } else if (!diyShapeEditor.closed) {
         diyShapeEditor.points.push(point);
         diyShapeEditor.selectedIndex = diyShapeEditor.points.length - 1;
         diyShapeEditor.draggingIndex = diyShapeEditor.selectedIndex;
@@ -3653,6 +3736,11 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
 
     function undoDiyShapePoint() {
       if (!diyShapeEditor.points.length) return;
+      if (diyShapeEditor.closed) {
+        diyShapeEditor.closed = false;
+        renderDiyShapeEditor();
+        return;
+      }
       const index = diyShapeEditor.selectedIndex >= 0 ? diyShapeEditor.selectedIndex : diyShapeEditor.points.length - 1;
       diyShapeEditor.points.splice(index, 1);
       diyShapeEditor.selectedIndex = Math.min(diyShapeEditor.points.length - 1, index - 1);
@@ -3663,33 +3751,37 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       diyShapeEditor.points = [];
       diyShapeEditor.selectedIndex = -1;
       diyShapeEditor.draggingIndex = -1;
+      diyShapeEditor.closed = false;
       renderDiyShapeEditor();
     }
 
     function saveDiyShapeElement() {
-      const win = currentWindow();
-      if (!win) return;
       const points = normalizeShapePoints(diyShapeEditor.points);
       if (points.length < 3) {
         showToast("DIY异形框至少需要3个点。");
         return;
       }
+      if (!diyShapeEditor.closed) {
+        showToast("请先点击第一个点闭合成面。");
+        return;
+      }
+      const name = valueOf("diyShapeName").trim();
+      if (!name) {
+        showToast("请先输入DIY窗型名称。");
+        document.getElementById("diyShapeName")?.focus();
+        return;
+      }
       const shapeId = `DIY-${Date.now().toString(36).toUpperCase()}`;
-      win.shape = normalizeWindowShape({ type: "custom_polygon", points });
       project.customShapes ||= [];
       project.customShapes.push(normalizeCustomShapeElement({
         shapeId,
-        name: `${win.mark || "当前窗"} DIY异形框`,
-        windowId: win.windowId,
+        name,
         points,
         createdAt: new Date().toISOString()
       }));
-      setValue("winShape", "custom_polygon");
-      setValue("shapePoints", formatShapePoints(points));
       closeDiyShapeEditor();
-      switchInspector("window");
       markDirty();
-      showToast("DIY异形框已保存为窗型元素。");
+      showToast(`DIY窗型“${name}”已保存到工具库。`);
     }
 
     function outwardLabelVector(point, centroid, distance) {
@@ -6087,6 +6179,10 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       });
       document.querySelectorAll("[data-shape-preset]").forEach(btn => {
         btn.addEventListener("click", () => applyShapePreset(btn.dataset.shapePreset));
+      });
+      bindById("customShapeLibrary", "click", event => {
+        const button = event.target.closest("[data-custom-shape]");
+        if (button) applyCustomShapeElement(button.dataset.customShape);
       });
       bindById("toolSearch", "input", filterToolLibrary);
       document.querySelectorAll("[data-cell-menu-type]").forEach(btn => {

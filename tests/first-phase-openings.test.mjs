@@ -373,7 +373,11 @@ assert.ok(app.includes("function renderCustomShapeAnnotations("), "DIY polygon f
 assert.ok(app.includes("function polygonVertexAngle("), "DIY polygon angle labels should be derived from adjacent edges");
 assert.ok(app.includes("function openDiyShapeEditor("), "DIY polygon modeling should open a dedicated blank drawing canvas");
 assert.ok(app.includes("function handleDiyShapePointerDown("), "DIY polygon modeling should create vertices directly on the dedicated canvas");
-assert.ok(app.includes("function saveDiyShapeElement("), "saving the DIY canvas should write the drawn outline back as a window-shape element");
+assert.ok(app.includes("function saveDiyShapeElement("), "saving the DIY canvas should store a named reusable shape element");
+assert.ok(app.includes("diyShapeEditor.closed"), "DIY polygon modeling should require closing the outline back to its first point");
+assert.ok(app.includes('valueOf("diyShapeName").trim()'), "saving a DIY polygon should require a user-provided name");
+assert.ok(app.includes("function renderCustomShapeLibrary("), "saved DIY outlines should appear in the drawing tool library");
+assert.ok(app.includes("function applyCustomShapeElement("), "saved DIY outlines should be applied only when the user chooses them from the tool library");
 assert.ok(app.includes("project.customShapes.push"), "saved DIY outlines should be retained in the project as reusable shape elements");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");

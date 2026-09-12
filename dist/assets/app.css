@@ -97,6 +97,46 @@
       border-color: #ecc8c4;
     }
 
+    .custom-shape-library {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .custom-shape-library:empty {
+      display: none;
+    }
+
+    .custom-shape-item {
+      min-height: 56px;
+      padding: 7px;
+      display: grid;
+      place-items: center;
+      gap: 3px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .custom-shape-item svg {
+      width: 54px;
+      height: 28px;
+      display: block;
+    }
+
+    .custom-shape-item strong {
+      max-width: 100%;
+      font-size: 12px;
+      line-height: 1.2;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     button.icon {
       width: 34px;
       padding: 0;
@@ -1347,6 +1387,13 @@
       margin-top: 8px;
     }
 
+    .diy-name-field {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
     .diy-work-area {
       fill: #f8fbff;
       stroke: #cad7e8;
@@ -1394,6 +1441,25 @@
       paint-order: stroke;
       stroke: rgba(255, 255, 255, 0.9);
       stroke-width: 3px;
+    }
+
+    .diy-dimension,
+    .diy-angle,
+    .diy-overall-dimension {
+      fill: #2f45bf;
+      font-size: 12px;
+      font-weight: 700;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: rgba(255, 255, 255, 0.92);
+      stroke-width: 3px;
+    }
+
+    .diy-overall-guide {
+      stroke: #596bd4;
+      stroke-width: 1.2;
+      marker-start: url(#diyDimTick);
+      marker-end: url(#diyDimTick);
     }
 
     .preview-dialog-shell {
