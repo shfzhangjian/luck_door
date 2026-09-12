@@ -362,6 +362,8 @@ assert.ok(app.includes("renderPlanView(win, rects, x, planY"), "the plan view sh
 assert.ok(app.includes("Math.max(110, extents.inside + 54)"), "the overall plan dimension should remain below inward-opening sash projections");
 assert.ok(app.includes("function buildPlanOpeningParts("), "the plan view should build one shared-kinematics descriptor per movable sash");
 assert.ok(app.includes('data-plan-panel="${label}"'), "the plan should expose each projected sash as a distinct drawing element");
+assert.ok(app.includes("function renderPlanMotionGuide("), "the plan should show a clear motion guide from closed position to opened position");
+assert.ok(app.includes('marker-end="url(#planMotionArrow)"'), "the plan opening guide should include a direction arrow");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");

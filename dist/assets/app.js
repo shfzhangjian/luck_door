@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-29";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-29";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-30";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-30";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-29";
+} from "./openings.js?v=20260912-30";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-29";
+} from "./topology.js?v=20260912-30";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-29";
+} from "./joints.js?v=20260912-30";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-29";
+} from "./assemblies.js?v=20260912-30";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-29";
+} from "./installations.js?v=20260912-30";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -1909,6 +1909,7 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const outlineColor = series.material === "pvc" ? "#d8dcdd" : "#26393e";
       const parts = [];
 
+      parts.push(svgPlanDefs());
       parts.push(`<text class="window-mark" x="${view.w / 2}" y="${Math.max(18, y - 38)}">${escapeHtml(win.mark)}</text>`);
       parts.push(renderSurroundElevation(win, x, y, drawW, drawH, scale));
       parts.push(`<path d="${framePath}" fill="${frameColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="2" />`);
@@ -2058,6 +2059,14 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
 
       document.getElementById("drawingTitle").textContent = `${win.mark} · ${win.name || ""}`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${win.widthMm}×${win.heightMm} mm · ${win.layout.columns.length}列${win.layout.rows.length}行 · ${currentSeries(win).name}`;
+    }
+
+    function svgPlanDefs() {
+      return `<defs>
+        <marker id="planMotionArrow" viewBox="0 0 8 8" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#1677ff" />
+        </marker>
+      </defs>`;
     }
 
     function renderSurroundElevation(win, x, y, width, height, scale) {
@@ -2802,7 +2811,6 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const closedPoints = planProjectionPoints(closed.corners, planY);
       const openedPoints = planProjectionPoints(opened.corners, planY);
       const openedCenterY = planY - opened.position.z;
-      const closedCenterY = planY - closed.position.z;
       const label = escapeHtml(part.label || "活动扇");
       if (ratio <= 0.001) {
         return `<g class="plan-opening-projection ${overhead ? "overhead" : ""}" data-plan-panel="${label}">
@@ -2812,7 +2820,7 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       }
       return `<g class="plan-opening-projection ${overhead ? "overhead" : ""}" data-plan-panel="${label}">
         <polygon class="plan-sash-closed" points="${closedPoints}" />
-        <line class="plan-motion-center" x1="${closed.position.x}" y1="${closedCenterY}" x2="${opened.position.x}" y2="${openedCenterY}" />
+        ${renderPlanMotionGuide(closed.position, opened.position, planY, label)}
         <polygon class="plan-sash-current" points="${openedPoints}" />
         <text class="plan-panel-label" x="${opened.position.x}" y="${openedCenterY - 7}">${label}</text>
         <title>${label} · 当前开启投影</title>
@@ -2831,11 +2839,27 @@ const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
       const labelX = endPanel?.center.x ?? part.closedPosition.x;
       const labelY = planY - (endPanel?.center.z || 0) - 7;
       const label = escapeHtml(part.label || "折叠组");
+      const guideStart = closed.panels[0]?.center || part.closedPosition;
+      const guideEnd = endPanel?.center || part.closedPosition;
       return `<g class="plan-opening-projection folding" data-plan-panel="${label}">
         ${ratio > 0.001 ? closedShapes : ""}
+        ${ratio > 0.001 ? renderPlanMotionGuide(guideStart, guideEnd, planY, label) : ""}
         ${openedShapes}
         ${ratio > 0.001 ? `<text class="plan-panel-label" x="${labelX}" y="${labelY}">${label}</text>` : ""}
         <title>${label} · ${opened.panels.length}扇投影</title>
+      </g>`;
+    }
+
+    function renderPlanMotionGuide(start, end, planY, label) {
+      const startX = start.x;
+      const startY = planY - start.z;
+      const endX = end.x;
+      const endY = planY - end.z;
+      if (Math.hypot(endX - startX, endY - startY) < 2) return "";
+      return `<g class="plan-motion-guide">
+        <path class="plan-motion-path" d="M${startX} ${startY} L${endX} ${endY}" marker-end="url(#planMotionArrow)" />
+        <circle class="plan-motion-end" cx="${endX}" cy="${endY}" r="3.2" />
+        <title>${label} · 开启轨迹</title>
       </g>`;
     }
 

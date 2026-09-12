@@ -910,6 +910,19 @@
       stroke-dasharray: 4 4;
     }
 
+    .plan-motion-path {
+      fill: none;
+      stroke: #1677ff;
+      stroke-width: 2;
+      stroke-dasharray: 6 4;
+    }
+
+    .plan-motion-end {
+      fill: #1677ff;
+      stroke: #fff;
+      stroke-width: 1.5;
+    }
+
     .plan-panel-label {
       fill: #075bd8;
       font-size: 9px;
