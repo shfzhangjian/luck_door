@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-42";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-42";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-43";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-43";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-42";
+} from "./openings.js?v=20260912-43";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-42";
+} from "./topology.js?v=20260912-43";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-42";
+} from "./joints.js?v=20260912-43";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-42";
+} from "./assemblies.js?v=20260912-43";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-42";
+} from "./installations.js?v=20260912-43";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -76,6 +76,9 @@ const SHAPE_PRESETS = Object.freeze([
   { type: "custom_polygon", label: "DIY异形框", icon: "DIY", description: "按点位录入的自定义多边形外框" }
 ]);
 const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(item => [item.type, item])));
+const LEGACY_FILL_CELL_TYPES = Object.freeze(["screen", "louver", "grille", "panel"]);
+const INFILL_TYPES = Object.freeze(["glass", "panel", "louver"]);
+const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "retractable"]);
 
     let project = loadProject();
     let selectedWindowId = project.windows[0]?.windowId || "";
@@ -315,10 +318,6 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         points
       };
     }
-
-    const LEGACY_FILL_CELL_TYPES = Object.freeze(["screen", "louver", "grille", "panel"]);
-    const INFILL_TYPES = Object.freeze(["glass", "panel", "louver"]);
-    const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "retractable"]);
 
     function migrateLegacyCellType(type) {
       if (type === "panel") return { type: "fixed_glass", infillType: "panel" };
