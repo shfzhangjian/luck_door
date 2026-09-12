@@ -379,6 +379,11 @@ assert.ok(app.includes('valueOf("diyShapeName").trim()'), "saving a DIY polygon 
 assert.ok(app.includes("function renderCustomShapeLibrary("), "saved DIY outlines should appear in the drawing tool library");
 assert.ok(app.includes("function applyCustomShapeElement("), "saved DIY outlines should be applied only when the user chooses them from the tool library");
 assert.ok(app.includes("project.customShapes.push"), "saved DIY outlines should be retained in the project as reusable shape elements");
+assert.ok(app.includes("function normalizeCellCustomShape("), "DIY outlines applied to a design should be normalized as cell-level geometry");
+assert.ok(app.includes("cell.customShape = normalizeCellCustomShape"), "a saved DIY outline should attach to the selected cell instead of repainting the whole window");
+assert.ok(app.includes("function cellCustomShapePath("), "2D elevations should render the selected cell with its DIY outline");
+assert.ok(app.includes("function addThreeCustomCellGeometry("), "3D preview should build profile and glass geometry from the DIY cell outline");
+assert.ok(app.includes("function addThreeCustomOperableCell("), "3D preview should animate the DIY outline itself when the cell is operable");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");

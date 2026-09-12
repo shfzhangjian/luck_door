@@ -61,6 +61,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/componentTemplate" }
     },
+    "customShapes": {
+      "type": "array",
+      "description": "用户在DIY异型构件画布中保存的可复用窗格轮廓。",
+      "items": { "$ref": "#/$defs/customShapeElement" }
+    },
     "viewOptions": { "$ref": "#/$defs/viewOptions" },
     "calculation": {
       "type": "object",
@@ -543,6 +548,45 @@
       },
       "additionalProperties": true
     },
+    "shapePoint": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 100 },
+        "y": { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "additionalProperties": false
+    },
+    "customShapeElement": {
+      "type": "object",
+      "required": ["shapeId", "name", "points"],
+      "properties": {
+        "shapeId": { "type": "string" },
+        "name": { "type": "string" },
+        "windowId": { "type": "string" },
+        "points": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/shapePoint" }
+        },
+        "createdAt": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "cellCustomShape": {
+      "type": "object",
+      "required": ["name", "points"],
+      "properties": {
+        "shapeId": { "type": "string" },
+        "name": { "type": "string" },
+        "points": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/shapePoint" }
+        }
+      },
+      "additionalProperties": true
+    },
     "cell": {
       "type": "object",
       "required": ["cellId", "type"],
@@ -558,6 +602,7 @@
           "enum": ["fixed", "left_in", "right_in", "left_out", "right_out", "top_in", "top_out", "bottom_in", "bottom_out", "slide_left", "slide_right", "lift_slide_left", "lift_slide_right", "psk_left", "psk_right", "parallel_slide_left", "parallel_slide_right", "parallel_out", "pocket_left", "pocket_right", "pocket_both", "corner_left", "corner_right", "corner_both", "slide_up", "slide_down", "fold_left", "fold_right"]
         },
         "openingAssembly": { "$ref": "#/$defs/openingAssembly" },
+        "customShape": { "$ref": "#/$defs/cellCustomShape" },
         "glassTypeId": { "type": "string" },
         "hardwareSetId": { "type": "string" },
         "panelTypeId": { "type": "string" },

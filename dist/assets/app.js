@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-36";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-36";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-37";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-37";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-36";
+} from "./openings.js?v=20260912-37";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-36";
+} from "./topology.js?v=20260912-37";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-36";
+} from "./joints.js?v=20260912-37";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-36";
+} from "./assemblies.js?v=20260912-37";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-36";
+} from "./installations.js?v=20260912-37";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -286,6 +286,17 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       };
     }
 
+    function normalizeCellCustomShape(value) {
+      if (!value) return null;
+      const points = normalizeShapePoints(value.points);
+      if (points.length < 3) return null;
+      return {
+        shapeId: String(value.shapeId || ""),
+        name: String(value.name || "DIY异形构件"),
+        points
+      };
+    }
+
     function createCell(type = "fixed_glass", opening = "") {
       const normalizedOpening = normalizeOpening(type, opening || defaultOpeningForType(type));
       return {
@@ -297,6 +308,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         hardwareSetId: defaultHardwareSetForType(type),
         panelTypeId: "PN-SANDWICH",
         handleHeightMm: 750,
+        customShape: null,
         note: ""
       };
     }
@@ -331,6 +343,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         hardwareSetId: cell?.hardwareSetId || base.hardwareSetId,
         panelTypeId: cell?.panelTypeId || "PN-SANDWICH",
         handleHeightMm: Math.max(0, Number(cell?.handleHeightMm ?? 750)),
+        customShape: normalizeCellCustomShape(cell?.customShape),
         note: cell?.note || ""
       };
     }
@@ -901,13 +914,18 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     function applyCustomShapeElement(shapeId) {
       const win = currentWindow();
       const item = project.customShapes?.find(shape => shape.shapeId === shapeId);
-      if (!win || !item) return;
-      win.shape = normalizeWindowShape({ type: "custom_polygon", points: item.points });
+      const cell = currentCell(win);
+      if (!win || !cell || !item) return;
+      cell.customShape = normalizeCellCustomShape({
+        shapeId: item.shapeId,
+        name: item.name,
+        points: item.points
+      });
       selectedMemberId = "";
       selectedJointId = "";
-      switchInspector("window");
+      switchInspector("cell");
       markDirty();
-      showToast(`已应用DIY窗型：${item.name}`);
+      showToast(`已将DIY异形构件“${item.name}”应用到选中窗格。`);
     }
 
     function addLocalMember(orientation) {
@@ -1539,6 +1557,8 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       const cell = currentCell(win);
       if (cell) {
         setValue("cellType", cell.type);
+        setValue("cellCustomShapeName", cell.customShape?.name || "");
+        document.getElementById("cellCustomShapeField")?.classList.toggle("hidden", !cell.customShape);
         renderSelect("opening", openingOptionsForType(cell.type).map(item => [item.value, item.label]), cell.opening);
         renderInputDatalist("cellGlass", project.catalog.glassTypes, cell.glassTypeId || win.defaultGlassTypeId);
         renderInputDatalist("cellHardware", project.catalog.hardwareSets, cell.hardwareSetId || win.defaultHardwareSetId);
@@ -2013,6 +2033,16 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       return `<svg viewBox="-6 -6 112 112" aria-hidden="true"><path d="${path} Z" fill="rgba(187,225,238,0.55)" stroke="#20383e" stroke-width="5" vector-effect="non-scaling-stroke" /></svg>`;
     }
 
+    function cellCustomShapePath(cell, item) {
+      const shape = normalizeCellCustomShape(cell?.customShape);
+      if (!shape) return "";
+      return shape.points.map((point, index) => {
+        const px = item.x + point.x / 100 * item.w;
+        const py = item.y + point.y / 100 * item.h;
+        return `${index ? "L" : "M"}${px} ${py}`;
+      }).join(" ") + " Z";
+    }
+
     function renderSvg() {
       const svg = document.getElementById("windowSvg");
       const win = currentWindow();
@@ -2064,8 +2094,17 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         const selected = item.row === selectedCell.row && item.col === selectedCell.col;
         const fill = cellFill(cell.type);
         const openable = isOperableType(cell.type);
+        const cellPath = cellCustomShapePath(cell, item);
+        const clipId = cellPath ? `cellClip-${item.row}-${item.col}` : "";
         parts.push(`<g class="cell" data-row="${item.row}" data-col="${item.col}" tabindex="0">`);
-        parts.push(`<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${fill}" stroke="${cell.type === "empty" ? "#b8c3c6" : "#5a747b"}" stroke-width="1.2" />`);
+        if (cellPath) {
+          parts.push(`<defs><clipPath id="${clipId}"><path d="${cellPath}" /></clipPath></defs>`);
+          parts.push(`<path d="${cellPath}" fill="${fill}" stroke="${cell.type === "empty" ? "#b8c3c6" : "#5a747b"}" stroke-width="1.6" />`);
+          parts.push(`<text class="shape-angle-label" x="${item.x + item.w / 2}" y="${item.y + 16}">${escapeHtml(cell.customShape.name)}</text>`);
+        } else {
+          parts.push(`<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${fill}" stroke="${cell.type === "empty" ? "#b8c3c6" : "#5a747b"}" stroke-width="1.2" />`);
+        }
+        if (cellPath) parts.push(`<g clip-path="url(#${clipId})">`);
         if (openable) {
           const inset = Math.min(item.w, item.h) * 0.12;
           if (options.showOpenState) {
@@ -2077,11 +2116,16 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         }
         parts.push(cellDecoration(cell.type, item, outlineColor));
         parts.push(integratedScreenDecoration(cell, item, outlineColor));
+        if (cellPath) parts.push(`</g>`);
         parts.push(`<text class="cell-label" x="${item.x + item.w / 2}" y="${item.y + item.h / 2}">${escapeHtml(cellDrawingCode(cell.type, i))}</text>`);
         if (selected && openable && options.showDimensions) {
           parts.push(handleHeightDimension(cell, item, scale));
         }
-        if (selected) parts.push(`<rect class="selected-stroke" x="${item.x + 3}" y="${item.y + 3}" width="${Math.max(0, item.w - 6)}" height="${Math.max(0, item.h - 6)}" />`);
+        if (selected) {
+          parts.push(cellPath
+            ? `<path class="selected-stroke" d="${cellPath}" />`
+            : `<rect class="selected-stroke" x="${item.x + 3}" y="${item.y + 3}" width="${Math.max(0, item.w - 6)}" height="${Math.max(0, item.h - 6)}" />`);
+        }
         parts.push(`</g>`);
       }
 
@@ -4346,6 +4390,12 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
     function addThreeCell(parent, cell, rect, mats, meta) {
       if (!cell || cell.type === "empty") return;
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      if (cell.customShape && isOperableType(cell.type)) {
+        addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly);
+        addIntegratedScreen(parent, cell, rect, mats, meta);
+        return;
+      }
+      if (cell.customShape) addThreeCustomCellGeometry(parent, cell, rect, mats);
       if (cell.type === "panel") {
         addBox(parent, rect.x, rect.y, 0.035, rect.w * 0.92, rect.h * 0.92, rect.depth * 0.25, mats.panel);
         return;
@@ -4433,7 +4483,97 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         addIntegratedScreen(parent, cell, rect, mats, meta);
         return;
       }
-      addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
+      if (!cell.customShape) addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
+    }
+
+    function addThreeCustomCellGeometry(parent, cell, rect, mats) {
+      const shapeData = normalizeCellCustomShape(cell.customShape);
+      if (!shapeData || !threeLib) return;
+      const group = new threeLib.Group();
+      group.position.set(rect.x, rect.y, 0.03);
+      addThreeCustomShapeBody(group, shapeData, rect.w * 0.92, rect.h * 0.92, rect.face * 0.26, rect.depth * 0.5, mats);
+      parent.add(group);
+    }
+
+    function addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly) {
+      const shapeData = normalizeCellCustomShape(cell.customShape);
+      if (!shapeData || !threeLib) return;
+      const sash = new threeLib.Group();
+      const sashWidth = rect.w * 0.9;
+      const sashHeight = rect.h * 0.9;
+      sash.position.set(rect.x, rect.y, 0.065);
+      addThreeCustomShapeBody(sash, shapeData, sashWidth, sashHeight, rect.face * 0.32, rect.depth * 0.54, mats);
+      const leftOpening = cell.opening?.startsWith("left") || cell.opening?.endsWith("left");
+      if (["turn", "turn_tilt", "door"].includes(cell.type)) {
+        addHandle(sash, (leftOpening ? 1 : -1) * sashWidth * 0.34, 0, rect.depth * 0.58, rect.face, mats.hardware);
+        addHinges(sash, (leftOpening ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark);
+      } else if (cell.type === "top_hung" || cell.type === "bottom_hung") {
+        const topHinged = cell.type === "top_hung";
+        addHorizontalHandle(sash, 0, (topHinged ? -1 : 1) * sashHeight * 0.34, rect.depth * 0.58, rect.face, mats.hardware);
+        addHorizontalHinges(sash, (topHinged ? 1 : -1) * sashHeight * 0.46, sashWidth, rect.face, rect.depth, mats.hardwareDark);
+      } else {
+        addHandle(sash, sashWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
+      }
+      parent.add(sash);
+      const horizontalDirection = cell.opening?.endsWith("right") || assembly.stackSide === "right" ? 1 : -1;
+      const verticalDirection = cell.opening === "slide_down" || assembly.stackSide === "bottom" ? -1 : 1;
+      const travel = Math.max(sashWidth, sashHeight) * 0.62;
+      const motionType = ["corner_slide", "folding"].includes(cell.type) ? "sliding" : cell.type;
+      registerOpenable({
+        cell,
+        key: `${meta.windowId}:${meta.row}:${meta.col}:DIY`,
+        windowId: meta.windowId,
+        windowMark: meta.windowMark,
+        row: meta.row,
+        col: meta.col,
+        object: sash,
+        type: cell.type,
+        motionType,
+        panelLabel: `${shapeData.name} · ${assembly.panels[0]?.label || "异形扇"}`,
+        operationOrder: 0,
+        width: sashWidth,
+        height: sashHeight,
+        travel,
+        liftHeight: cell.type === "lift_slide" ? rect.h * 0.035 : 0,
+        releaseDepth: ["psk", "parallel_slide", "corner_slide"].includes(cell.type) ? Math.max(0.055, rect.depth * 0.82) : 0,
+        projectDepth: cell.type === "parallel_project" ? Math.max(0.22, rect.depth * 3.2) : 0,
+        openPlane: assembly.openPlane,
+        direction: cell.type === "vertical_slide" ? verticalDirection : horizontalDirection,
+        closedPosition: sash.position.clone(),
+        motionMode: (cell.type === "turn_tilt" || cell.type === "psk") && assembly.operationPriority === "tilt_first" ? "tilt" : "primary",
+        current: 0,
+        target: 0
+      });
+    }
+
+    function addThreeCustomShapeBody(parent, shapeData, width, height, face, depth, mats) {
+      const points = shapeData.points.map(point => ({
+        x: -width / 2 + point.x / 100 * width,
+        y: height / 2 - point.y / 100 * height
+      }));
+      const shape = new threeLib.Shape();
+      points.forEach((point, index) => {
+        if (index === 0) shape.moveTo(point.x, point.y);
+        else shape.lineTo(point.x, point.y);
+      });
+      shape.closePath();
+      const glassGeometry = new threeLib.ShapeGeometry(shape);
+      const glass = new threeLib.Mesh(glassGeometry, mats.glass);
+      glass.position.z = 0.01;
+      glass.userData.mountType = "diy-cell-glass";
+      parent.add(glass);
+      const edgeRadius = Math.max(0.008, face * 0.32);
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length <= 0.001) continue;
+        const rail = addBox(parent, (start.x + end.x) / 2, (start.y + end.y) / 2, 0.055, length, edgeRadius, depth, mats.profile);
+        rail.rotation.z = Math.atan2(dy, dx);
+        rail.userData.mountType = "diy-cell-frame";
+      }
     }
 
     function addSideHungAssembly(parent, cell, rect, mats, meta, assembly) {

@@ -81,6 +81,10 @@ const schema = JSON.parse(readFileSync(new URL("../docs/door-window-design.v2.sc
 assert.equal(schema.properties.schemaVersion.const, "cn-door-window-design.v2");
 assert.ok(schema.$defs.topologyMember, "v2 schema should define local topology members");
 assert.ok(schema.$defs.cell.required.includes("cellId"), "v2 cells should have stable ids");
+assert.ok(schema.properties.customShapes, "v2 schema should persist saved DIY shape tool items");
+assert.ok(schema.$defs.customShapeElement, "v2 schema should describe named reusable DIY shape elements");
+assert.ok(schema.$defs.cellCustomShape, "v2 schema should describe DIY geometry attached to an individual cell");
+assert.ok(schema.$defs.cell.properties.customShape, "v2 cells should be able to carry a selected DIY shape");
 
 const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
 [
@@ -88,6 +92,7 @@ const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8"
   "btnAddLocalVertical",
   "btnAddLocalHorizontal",
   "inspector-member",
+  "cellCustomShapeName",
   "memberContextMenu"
 ].forEach(id => assert.ok(html.includes(`id="${id}"`), `${id} should be available in the drawing workbench`));
 
