@@ -369,6 +369,8 @@ assert.ok(app.includes("function normalizeWindowShape("), "window shape data sho
 assert.ok(app.includes("function polygonFramePath("), "custom shape presets should render as real frame paths instead of inert buttons");
 assert.ok(app.includes("function parseShapePointsText("), "DIY polygon frames should parse editable point coordinates");
 assert.ok(app.includes("function insetPolygonTowardCentroid("), "DIY polygon frames should generate an inner frame path from the outer outline");
+assert.ok(app.includes("function renderCustomShapeAnnotations("), "DIY polygon frames should display edge lengths and vertex angles");
+assert.ok(app.includes("function polygonVertexAngle("), "DIY polygon angle labels should be derived from adjacent edges");
 assert.ok(app.includes("sashWidth - sashFace * 2.35"), "parallel-project glazing should use the sash rebate instead of an arbitrary undersized pane ratio");
 assert.ok(app.includes("function addParallelProjectMechanism("), "parallel-project sashes should include frame-mounted support hardware");
 assert.ok(app.includes("function updateParallelProjectMechanism("), "parallel-project linkage geometry should update throughout the opening motion");

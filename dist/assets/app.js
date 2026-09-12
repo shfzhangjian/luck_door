@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-32";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-32";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-33";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-33";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-32";
+} from "./openings.js?v=20260912-33";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-32";
+} from "./topology.js?v=20260912-33";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-32";
+} from "./joints.js?v=20260912-33";
 import {
   assemblyBounds,
   assemblySummary,
@@ -45,7 +45,7 @@ import {
   dockLabel,
   normalizeWindowAssemblies,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-32";
+} from "./assemblies.js?v=20260912-33";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +60,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-32";
+} from "./installations.js?v=20260912-33";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2050,6 +2050,7 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
         parts.push(dimensionLine(x, y + drawH + 34, x + drawW, y + drawH + 34, `${Math.round(win.widthMm)} mm`));
         parts.push(dimensionLine(x + drawW + 52, y, x + drawW + 52, y + drawH, `${Math.round(win.heightMm)} mm`, true));
         parts.push(`<text class="sill-height-label" x="${x + drawW + 10}" y="${y + drawH + 17}">台高 ${Math.round(win.installation?.sillHeightMm || 0)} mm</text>`);
+        parts.push(renderCustomShapeAnnotations(win, x, y, drawW, drawH));
       }
       if (options.showPlanView) {
         parts.push(renderPlanView(win, rects, x, planY, drawW, outlineColor, frameColor, options));
@@ -3468,6 +3469,62 @@ const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(
       }
       const mid = (x1 + x2) / 2;
       return `<g><line class="dimension" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" /><line class="dimension" x1="${x1}" y1="${y1 - 7}" x2="${x1}" y2="${y1 + 7}" /><line class="dimension" x1="${x2}" y1="${y2 - 7}" x2="${x2}" y2="${y2 + 7}" /><text class="dimension-text" x="${mid}" y="${y1 + 18}">${escapeHtml(label)}</text></g>`;
+    }
+
+    function renderCustomShapeAnnotations(win, x, y, w, h) {
+      const shape = normalizeWindowShape(win.shape);
+      if (shape.type !== "custom_polygon") return "";
+      const points = normalizeShapePoints(shape.points);
+      if (points.length < 3) return "";
+      const svgPoints = points.map(point => ({ x: x + point.x / 100 * w, y: y + point.y / 100 * h }));
+      const modelPoints = points.map(point => ({ x: point.x / 100 * win.widthMm, y: point.y / 100 * win.heightMm }));
+      const centroid = svgPoints.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+      centroid.x /= svgPoints.length;
+      centroid.y /= svgPoints.length;
+      const parts = [`<g class="shape-annotation" aria-label="DIY异形框边长与角度">`];
+      for (let index = 0; index < svgPoints.length; index += 1) {
+        const nextIndex = (index + 1) % svgPoints.length;
+        const start = svgPoints[index];
+        const end = svgPoints[nextIndex];
+        const modelStart = modelPoints[index];
+        const modelEnd = modelPoints[nextIndex];
+        const lengthMm = Math.hypot(modelEnd.x - modelStart.x, modelEnd.y - modelStart.y);
+        const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+        const outward = outwardLabelVector(mid, centroid, 16);
+        const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI;
+        parts.push(`<line class="shape-edge-guide" x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" />`);
+        parts.push(`<text class="shape-edge-label" x="${mid.x + outward.x}" y="${mid.y + outward.y}" transform="rotate(${angle} ${mid.x + outward.x} ${mid.y + outward.y})">${Math.round(lengthMm)} mm</text>`);
+      }
+      for (let index = 0; index < svgPoints.length; index += 1) {
+        const prev = modelPoints[(index - 1 + modelPoints.length) % modelPoints.length];
+        const current = modelPoints[index];
+        const next = modelPoints[(index + 1) % modelPoints.length];
+        const svgPoint = svgPoints[index];
+        const labelVector = outwardLabelVector(svgPoint, centroid, 24);
+        const angleDeg = polygonVertexAngle(prev, current, next);
+        parts.push(`<circle class="shape-vertex-dot" cx="${svgPoint.x}" cy="${svgPoint.y}" r="3.5" />`);
+        parts.push(`<text class="shape-angle-label" x="${svgPoint.x + labelVector.x}" y="${svgPoint.y + labelVector.y}">${Math.round(angleDeg)}°</text>`);
+      }
+      parts.push(`</g>`);
+      return parts.join("");
+    }
+
+    function outwardLabelVector(point, centroid, distance) {
+      const dx = point.x - centroid.x;
+      const dy = point.y - centroid.y;
+      const length = Math.hypot(dx, dy) || 1;
+      return { x: dx / length * distance, y: dy / length * distance };
+    }
+
+    function polygonVertexAngle(prev, current, next) {
+      const ax = prev.x - current.x;
+      const ay = prev.y - current.y;
+      const bx = next.x - current.x;
+      const by = next.y - current.y;
+      const dot = ax * bx + ay * by;
+      const lengths = (Math.hypot(ax, ay) || 1) * (Math.hypot(bx, by) || 1);
+      const radians = Math.acos(Math.min(1, Math.max(-1, dot / lengths)));
+      return radians * 180 / Math.PI;
     }
 
     function renderCssPreview(win) {
