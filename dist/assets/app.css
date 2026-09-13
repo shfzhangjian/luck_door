@@ -1224,6 +1224,80 @@
       pointer-events: none;
     }
 
+    .assembly-plan-view {
+      pointer-events: none;
+    }
+
+    .assembly-plan-split {
+      fill: none;
+      stroke: #dbe6ee;
+      stroke-width: 1;
+    }
+
+    .assembly-plan-frame {
+      fill: rgba(201, 208, 213, 0.62);
+      stroke: #364246;
+      stroke-width: 2.2;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .assembly-plan-inner {
+      fill: rgba(235, 246, 251, 0.68);
+      stroke: #708493;
+      stroke-width: 1.5;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .assembly-plan-window.selected .assembly-plan-frame {
+      fill: rgba(208, 235, 255, 0.82);
+      stroke: var(--primary);
+      stroke-width: 3;
+    }
+
+    .assembly-plan-window-label {
+      fill: #263b49;
+      font-size: 11px;
+      font-weight: 750;
+      text-anchor: middle;
+      dominant-baseline: central;
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 3px;
+    }
+
+    .assembly-plan-joint {
+      fill: none;
+      stroke: #cc7a00;
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-dasharray: 8 5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .assembly-plan-joint-node {
+      fill: #f59e0b;
+      stroke: #8a4b00;
+      stroke-width: 1.8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .assembly-plan-joint-label,
+    .assembly-plan-joint-detail {
+      fill: #8a4b00;
+      font-size: 10px;
+      font-weight: 750;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 3px;
+    }
+
+    .assembly-plan-joint-detail {
+      font-size: 9px;
+    }
+
     .assembly-empty-state {
       fill: var(--muted);
       font-size: 16px;

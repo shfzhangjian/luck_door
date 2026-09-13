@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-47";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-47";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-48";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-48";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-47";
+} from "./openings.js?v=20260912-48";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-47";
+} from "./topology.js?v=20260912-48";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-47";
+} from "./joints.js?v=20260912-48";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-47";
+} from "./assemblies.js?v=20260912-48";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-47";
+} from "./installations.js?v=20260912-48";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2556,11 +2556,13 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function renderAssemblySvg(svg) {
-      const view = { w: 900, h: 700 };
+      const showPlanView = Boolean(project.viewOptions?.showPlanView);
+      const view = { w: 900, h: showPlanView ? 760 : 700 };
+      const elevationHeight = showPlanView ? 500 : view.h;
       const assembly = currentProjectAssembly();
       svg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
       if (!assembly) {
-        svg.innerHTML = '<text class="assembly-empty-state" x="450" y="330">尚未建立门窗拼接</text>';
+        svg.innerHTML = `<text class="assembly-empty-state" x="450" y="${elevationHeight / 2}">尚未建立门窗拼接</text>`;
         document.getElementById("drawingTitle").textContent = "拼接总图";
         document.getElementById("drawingStats").textContent = `${project.windows.length}樘待拼接门窗`;
         return;
@@ -2586,10 +2588,10 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const margin = 86;
       const scale = Math.min(
         (view.w - margin * 2) / Math.max(1, maxX - minX),
-        (view.h - margin * 2) / Math.max(1, maxY - minY)
+        (elevationHeight - margin * 2) / Math.max(1, maxY - minY)
       );
       const offsetX = (view.w - (maxX - minX) * scale) / 2 - minX * scale;
-      const offsetY = (view.h - (maxY - minY) * scale) / 2 - minY * scale;
+      const offsetY = (elevationHeight - (maxY - minY) * scale) / 2 - minY * scale;
       const point = (item, localX, localY) => {
         const raw = rawPoint(item, localX, localY);
         return { x: raw.x * scale + offsetX, y: raw.y * scale + offsetY };
@@ -2653,9 +2655,12 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       });
 
       const bounds = assemblyBounds(layout);
-      parts.push(dimensionLine(margin, view.h - 42, view.w - margin, view.h - 42, `${Math.round(bounds.widthMm)} mm`));
-      parts.push(dimensionLine(view.w - 42, margin, view.w - 42, view.h - margin, `${Math.round(bounds.heightMm)} mm`, true));
-      if (bounds.depthMm > 0.5) parts.push(`<text class="sill-height-label" x="${margin}" y="${view.h - 18}">空间进深 ${Math.round(bounds.depthMm)} mm</text>`);
+      parts.push(dimensionLine(margin, elevationHeight - 42, view.w - margin, elevationHeight - 42, `${Math.round(bounds.widthMm)} mm`));
+      parts.push(dimensionLine(view.w - 42, margin, view.w - 42, elevationHeight - margin, `${Math.round(bounds.heightMm)} mm`, true));
+      if (bounds.depthMm > 0.5) parts.push(`<text class="sill-height-label" x="${margin}" y="${elevationHeight - 18}">空间进深 ${Math.round(bounds.depthMm)} mm</text>`);
+      if (showPlanView) {
+        parts.push(renderAssemblyPlanView(assembly, layout, view.w, elevationHeight + 22, view.h - elevationHeight - 38));
+      }
       svg.innerHTML = parts.join("");
 
       const selectGroup = group => {
@@ -2684,6 +2689,114 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const summary = assemblySummary(assembly, project.windows);
       document.getElementById("drawingTitle").textContent = `${assembly.name} · 拼接总图`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${summary.windowIds.length}樘 · ${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`;
+    }
+
+    function assemblyPlanPoint(item, localX, localZ = 0) {
+      const angle = item.rotationDeg * Math.PI / 180;
+      return {
+        x: item.xMm + Math.cos(angle) * localX + Math.sin(angle) * localZ,
+        z: item.zMm - Math.sin(angle) * localX + Math.cos(angle) * localZ
+      };
+    }
+
+    function assemblyPlanFootprint(item) {
+      const win = item.window;
+      const series = currentSeries(win);
+      const halfWidth = Number(win.widthMm || 0) / 2;
+      const depth = Math.max(48, Number(series.frameDepthMm || series.faceWidthMm || 70));
+      const halfDepth = depth / 2;
+      const outer = [
+        assemblyPlanPoint(item, -halfWidth, -halfDepth),
+        assemblyPlanPoint(item, halfWidth, -halfDepth),
+        assemblyPlanPoint(item, halfWidth, halfDepth),
+        assemblyPlanPoint(item, -halfWidth, halfDepth)
+      ];
+      const innerInset = Math.min(halfDepth * 0.42, 18);
+      const inner = [
+        assemblyPlanPoint(item, -halfWidth + innerInset, -halfDepth + innerInset),
+        assemblyPlanPoint(item, halfWidth - innerInset, -halfDepth + innerInset),
+        assemblyPlanPoint(item, halfWidth - innerInset, halfDepth - innerInset),
+        assemblyPlanPoint(item, -halfWidth + innerInset, halfDepth - innerInset)
+      ];
+      return { item, outer, inner, depth };
+    }
+
+    function renderAssemblyPlanView(assembly, layout, viewWidth, planTopY, planHeight) {
+      if (!layout.length) return "";
+      const footprints = layout.map(assemblyPlanFootprint);
+      const centers = layout.map(item => assemblyPlanPoint(item, 0, 0));
+      const allPoints = footprints.flatMap(footprint => [...footprint.outer, ...footprint.inner]).concat(centers);
+      const values = key => allPoints.map(point => point[key]);
+      const minX = Math.min(...values("x"));
+      const maxX = Math.max(...values("x"));
+      const rawMinZ = Math.min(...values("z"));
+      const rawMaxZ = Math.max(...values("z"));
+      const rawDepth = Math.max(1, rawMaxZ - rawMinZ);
+      const depthMm = Math.max(rawDepth, 420);
+      const centerZ = (rawMinZ + rawMaxZ) / 2;
+      const minZ = centerZ - depthMm / 2;
+      const maxZ = centerZ + depthMm / 2;
+      const padX = 88;
+      const padY = 26;
+      const scale = Math.min(
+        (viewWidth - padX * 2) / Math.max(1, maxX - minX),
+        (planHeight - padY * 2) / Math.max(1, maxZ - minZ)
+      );
+      const offsetX = (viewWidth - (maxX - minX) * scale) / 2 - minX * scale;
+      const offsetY = planTopY + (planHeight - (maxZ - minZ) * scale) / 2 - minZ * scale;
+      const map = point => ({ x: point.x * scale + offsetX, y: point.z * scale + offsetY });
+      const pointString = points => points.map(point => {
+        const mapped = map(point);
+        return `${mapped.x.toFixed(2)},${mapped.y.toFixed(2)}`;
+      }).join(" ");
+      const planParts = [
+        `<g class="assembly-plan-view">`,
+        `<path class="assembly-plan-split" d="M${padX} ${planTopY - 8}H${viewWidth - padX}" />`,
+        `<text class="plan-side outside" x="${padX - 18}" y="${planTopY + 34}">室外</text>`,
+        `<text class="plan-side inside" x="${padX - 18}" y="${planTopY + planHeight - 14}">室内</text>`
+      ];
+
+      layout.forEach(item => {
+        if (!item.referenceWindowId) return;
+        const reference = layout.find(candidate => candidate.windowId === item.referenceWindowId);
+        if (!reference) return;
+        const placement = assembly.placements.find(candidate => candidate.placementId === item.placementId);
+        const joint = project.joints.find(candidate => candidate.jointId === placement?.jointId);
+        const from = map(assemblyPlanPoint(reference, 0, 0));
+        const to = map(assemblyPlanPoint(item, 0, 0));
+        const midX = (from.x + to.x) / 2;
+        const midY = (from.y + to.y) / 2;
+        const jointIndex = project.joints.indexOf(joint);
+        const label = joint ? jointLabel(joint, jointIndex) : dockLabel(item.dock);
+        const detail = joint
+          ? `${Math.round(joint.angleDeg || 180)}° · A ${Math.round(joint.legWidthAMm || 0)} / B ${Math.round(joint.legWidthBMm || 0)} mm`
+          : "";
+        planParts.push(`<line class="assembly-plan-joint" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" />`);
+        planParts.push(`<circle class="assembly-plan-joint-node" cx="${midX}" cy="${midY}" r="5" />`);
+        planParts.push(`<text class="assembly-plan-joint-label" x="${midX}" y="${midY - 12}">${escapeHtml(label)}</text>`);
+        if (detail) planParts.push(`<text class="assembly-plan-joint-detail" x="${midX}" y="${midY + 18}">${escapeHtml(detail)}</text>`);
+      });
+
+      footprints.forEach(footprint => {
+        const item = footprint.item;
+        const win = item.window;
+        const selected = item.placementId ? item.placementId === selectedPlacementId : !selectedPlacementId && win.windowId === selectedWindowId;
+        const center = map(assemblyPlanPoint(item, 0, 0));
+        planParts.push(`<g class="assembly-plan-window ${selected ? "selected" : ""}">`);
+        planParts.push(`<polygon class="assembly-plan-frame" points="${pointString(footprint.outer)}" />`);
+        planParts.push(`<polygon class="assembly-plan-inner" points="${pointString(footprint.inner)}" />`);
+        planParts.push(`<text class="assembly-plan-window-label" x="${center.x}" y="${center.y + 4}">${escapeHtml(win.mark)}</text>`);
+        planParts.push("</g>");
+      });
+
+      const dimY = planTopY + planHeight - 2;
+      planParts.push(dimensionLine(map({ x: minX, z: maxZ }).x, dimY, map({ x: maxX, z: maxZ }).x, dimY, `${Math.round(maxX - minX)} mm`));
+      if (rawDepth > 1) {
+        const depthX = viewWidth - padX + 14;
+        planParts.push(dimensionLine(depthX, map({ x: maxX, z: rawMinZ }).y, depthX, map({ x: maxX, z: rawMaxZ }).y, `${Math.round(rawDepth)} mm`, true));
+      }
+      planParts.push(`</g>`);
+      return planParts.join("");
     }
 
     function renderTopologyMembers(win, rects, face, fillColor, outlineColor) {

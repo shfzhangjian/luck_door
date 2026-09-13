@@ -182,5 +182,9 @@ assert.ok(app.includes('openJointPositionDialog("window"'), "choosing a frame pr
 assert.ok(app.includes("forceCreate: true"), "adding the next frame through a joint should create a new window");
 assert.ok(app.includes("connectionWorkflow: \"joint_driven_auto_frame\""), "runtime capabilities should describe joint-driven frame assembly");
 assert.ok(app.includes("interactionFlow: \"joint_position_dialog\""), "runtime capabilities should describe the joint position dialog flow");
+assert.ok(app.includes("function renderAssemblyPlanView("), "connected frame assemblies should render a dedicated plan view");
+assert.ok(app.includes("assembly-plan-window"), "assembly plan view should show every connected frame footprint");
+assert.ok(app.includes("assembly-plan-joint"), "assembly plan view should show connector and corner relationships");
+assert.ok(app.includes("project.viewOptions?.showPlanView"), "assembly drawing should respect the plan view toggle");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");
