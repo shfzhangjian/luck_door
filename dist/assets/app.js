@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-44";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-44";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-45";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-45";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-44";
+} from "./openings.js?v=20260912-45";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-44";
+} from "./topology.js?v=20260912-45";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-44";
+} from "./joints.js?v=20260912-45";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-44";
+} from "./assemblies.js?v=20260912-45";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,14 +63,14 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-44";
+} from "./installations.js?v=20260912-45";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
 const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
 const SHAPE_PRESETS = Object.freeze([
   { type: "rectangular", label: "四边框", icon: "□", description: "标准矩形洞口和窗框" },
-  { type: "arched", label: "上拱框", icon: "⌒", description: "顶部拱形固定或组合窗" },
+  { type: "arched", label: "上拱框", icon: "⌒", description: "顶部拱形固定或拼接窗" },
   { type: "trapezoid", label: "右斜顶框", icon: "⌿", description: "右侧斜顶或平行四边形外框" },
   { type: "trapezoid_left", label: "左斜顶框", icon: "⍀", description: "左侧斜顶或反向平行四边形外框" },
   { type: "trapezoid_peak", label: "双斜顶框", icon: "⌂", description: "顶部双坡/尖顶异形框" },
@@ -1142,7 +1142,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       selectedJointId = joint.jointId;
       switchInspector("joint");
       markDirty();
-      showToast(type === "corner" ? "已加入转角节点，请选择要拼接的方向。" : "已加入拼接节点，请选择要拼接的方向。");
+      openJointPositionDialog();
+      showToast(type === "corner" ? "已加入转角料，请选择窗型位置。" : "已加入拼接料，请选择窗型位置。");
     }
 
     function updateJointFromInputs() {
@@ -1232,14 +1233,14 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     function newProjectAssembly() {
       const root = currentWindow() || project.windows[0];
       if (!root) return;
-      const assembly = createWindowAssembly(root, `门窗组合${project.assemblies.length + 1}`);
+      const assembly = createWindowAssembly(root, `门窗拼接${project.assemblies.length + 1}`);
       project.assemblies.push(assembly);
       selectedAssemblyId = assembly.assemblyId;
       selectedPlacementId = "";
       drawingMode = "assembly";
       switchInspector("assembly");
       markDirty();
-      showToast(`已以${root.mark}作为根窗建立组合。`);
+      showToast(`已以${root.mark}作为基准窗。`);
     }
 
     function assemblyContainsWindow(assembly, windowId) {
@@ -1253,7 +1254,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         assembly = project.assemblies.find(item => assemblyContainsWindow(item, referenceWindow.windowId));
       }
       if (!assembly) {
-        assembly = createWindowAssembly(referenceWindow, `门窗组合${project.assemblies.length + 1}`);
+        assembly = createWindowAssembly(referenceWindow, `门窗拼接${project.assemblies.length + 1}`);
         project.assemblies.push(assembly);
       }
       selectedAssemblyId = assembly.assemblyId;
@@ -1291,6 +1292,29 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           cells: [{ type: "fixed_glass", opening: "fixed" }]
         }
       });
+    }
+
+    function openJointPositionDialog() {
+      const dialog = document.getElementById("jointPositionDialog");
+      const joint = currentJoint();
+      if (!dialog || !joint) return;
+      const subtitle = document.getElementById("jointPositionSubtitle");
+      if (subtitle) subtitle.textContent = `${jointLabel(joint)} · ${joint.type === "corner" ? "转角料" : "拼接料"}`;
+      if (dialog.showModal && !dialog.open) dialog.showModal();
+    }
+
+    function closeJointPositionDialog() {
+      const dialog = document.getElementById("jointPositionDialog");
+      if (dialog?.open) dialog.close();
+    }
+
+    function chooseJointPosition(dock) {
+      if (!currentJoint()) {
+        showToast("请先选择拼接料或转角料。");
+        return;
+      }
+      closeJointPositionDialog();
+      addAssemblyPlacement(dock);
     }
 
     function addAssemblyPlacement(dock) {
@@ -1346,8 +1370,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       normalizeProjectAssemblies();
       switchInspector("assembly");
       markDirty();
-      const action = createdWindow ? "新增并组合" : "已设置为";
-      showToast(`${movingWindow ? movingWindow.mark : "当前窗"}${action}${dockLabel(dock)}门窗。`);
+      const action = createdWindow ? "新增并拼接到" : "已设置到";
+      showToast(`${movingWindow ? movingWindow.mark : "当前窗"}${action}${dockLabel(dock)}。`);
     }
 
     function updateProjectAssemblyFromInputs() {
@@ -1401,7 +1425,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       hideAssemblyContextMenu();
       normalizeProjectAssemblies();
       markDirty();
-      showToast("窗体已移出当前组合。 ");
+      showToast("窗体已移出当前拼接。 ");
     }
 
     function deleteCurrentAssembly() {
@@ -1414,7 +1438,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       normalizeProjectAssemblies();
       switchInspector("window");
       markDirty();
-      showToast("门窗组合已删除，单窗设计仍然保留。 ");
+      showToast("门窗拼接关系已删除，单窗设计仍然保留。 ");
     }
 
     function filterToolLibrary() {
@@ -1846,7 +1870,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       renderProjectAssemblyInputs();
       const selectionModeLabel = document.getElementById("selectionModeLabel");
       if (selectionModeLabel) selectionModeLabel.textContent = drawingMode === "assembly"
-        ? `组合模式 · ${currentPlacement() ? "定位窗" : "根窗"}`
+        ? `拼接模式 · ${currentPlacement() ? "相邻窗" : "基准窗"}`
         : joint
           ? `选择模式 · ${joint.type === "corner" ? "转角节点" : "拼接节点"}`
           : member
@@ -2011,9 +2035,9 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         if (nameControl) nameControl.disabled = true;
         const rootControl = document.getElementById("projectAssemblyRoot");
         if (rootControl) rootControl.disabled = true;
-        document.getElementById("projectAssemblyTitle").textContent = "尚未建立组合";
-        document.getElementById("placementWindowLabel").textContent = "从左侧新建组合或选择停靠方向";
-        document.getElementById("projectAssemblySummary").innerHTML = '<li><span>组合状态</span><strong>未创建</strong></li>';
+        document.getElementById("projectAssemblyTitle").textContent = "尚未建立拼接";
+        document.getElementById("placementWindowLabel").textContent = "先添加拼接料或转角料，再选择窗型位置";
+        document.getElementById("projectAssemblySummary").innerHTML = '<li><span>拼接状态</span><strong>未创建</strong></li>';
         return;
       }
 
@@ -2060,10 +2084,10 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       document.getElementById("placementFreeFields").classList.toggle("hidden", !placement || placement.dock !== "free");
       const summary = assemblySummary(assembly, project.windows);
       document.getElementById("projectAssemblySummary").innerHTML = [
-        ["组合ID", summary.assemblyId],
+        ["拼接ID", summary.assemblyId],
         ["包含窗体", `${summary.windowIds.length}樘`],
         ["连接节点", `${summary.jointIds.length}个`],
-        ["组合外包", `${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`],
+        ["拼接外包", `${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`],
         ["根窗", project.windows.find(win => win.windowId === summary.rootWindowId)?.mark || summary.rootWindowId]
       ].map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></li>`).join("");
     }
@@ -2502,9 +2526,9 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const assembly = currentProjectAssembly();
       svg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
       if (!assembly) {
-        svg.innerHTML = '<text class="assembly-empty-state" x="450" y="330">尚未建立门窗组合</text>';
-        document.getElementById("drawingTitle").textContent = "组合总图";
-        document.getElementById("drawingStats").textContent = `${project.windows.length}樘待组合门窗`;
+        svg.innerHTML = '<text class="assembly-empty-state" x="450" y="330">尚未建立门窗拼接</text>';
+        document.getElementById("drawingTitle").textContent = "拼接总图";
+        document.getElementById("drawingStats").textContent = `${project.windows.length}樘待拼接门窗`;
         return;
       }
       const layout = resolveAssemblyLayout(assembly, project.windows);
@@ -2624,7 +2648,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         });
       });
       const summary = assemblySummary(assembly, project.windows);
-      document.getElementById("drawingTitle").textContent = `${assembly.name} · 组合总图`;
+      document.getElementById("drawingTitle").textContent = `${assembly.name} · 拼接总图`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${summary.windowIds.length}樘 · ${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`;
     }
 
@@ -4236,7 +4260,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const projectAssembly = drawingMode === "assembly" ? currentProjectAssembly() : null;
       if (projectAssembly) {
         const summary = assemblySummary(projectAssembly, project.windows);
-        if (title) title.textContent = "3D组合预览";
+        if (title) title.textContent = "3D拼接预览";
         if (stats) stats.textContent = `${projectAssembly.name} · ${summary.windowIds.length}樘 · ${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`;
       } else {
         if (title) title.textContent = "3D窗体预览";
@@ -6679,6 +6703,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
               aligns: ["start", "center", "end"],
               coordinateSystem: "millimeter-3d",
               connectionWorkflow: "joint_driven_auto_frame",
+              interactionFlow: "joint_position_dialog",
               autoCreateConnectedWindow: true,
               bomOwnership: "project"
             },
@@ -6909,6 +6934,13 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       bindById("diyShapeCanvas", "pointerup", handleDiyShapePointerUp);
       bindById("diyShapeDialog", "click", event => {
         if (event.target === event.currentTarget) closeDiyShapeEditor();
+      });
+      bindById("btnCloseJointPosition", "click", closeJointPositionDialog);
+      bindById("jointPositionDialog", "click", event => {
+        if (event.target === event.currentTarget) closeJointPositionDialog();
+      });
+      document.querySelectorAll("[data-joint-position]").forEach(btn => {
+        btn.addEventListener("click", () => chooseJointPosition(btn.dataset.jointPosition));
       });
       bindById("btnConfigureSurround", "click", openInstallationInspector);
       bindById("btnAddCol", "click", () => splitSelectedColumn(2));

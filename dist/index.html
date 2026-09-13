@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-44" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-45" />
   <script type="importmap">
     {
       "imports": {
@@ -104,14 +104,14 @@
               </div>
             </section>
 
-            <section class="tool-section" data-tool-group="多窗组合 装配 左右 上下 自由定位">
-              <div class="tool-section-head"><h3>多窗组合</h3><span>装配定位</span></div>
+            <section class="tool-section" data-tool-group="连接扩展 拼接 扩展 左方 右方 上方 下方 自由定位">
+              <div class="tool-section-head"><h3>连接扩展</h3><span>相邻窗位置</span></div>
               <div class="palette-grid compact">
-                <button id="btnNewAssembly" class="palette-tile"><span>⊞</span><strong>新建组合</strong></button>
-                <button id="btnPlaceLeft" class="palette-tile"><span>←</span><strong>左侧组合</strong></button>
-                <button id="btnPlaceRight" class="palette-tile"><span>→</span><strong>右侧组合</strong></button>
-                <button id="btnPlaceTop" class="palette-tile"><span>↑</span><strong>上方组合</strong></button>
-                <button id="btnPlaceBottom" class="palette-tile"><span>↓</span><strong>下方组合</strong></button>
+                <button id="btnNewAssembly" class="palette-tile"><span>◎</span><strong>设为基准</strong></button>
+                <button id="btnPlaceLeft" class="palette-tile"><span>←</span><strong>左方</strong></button>
+                <button id="btnPlaceRight" class="palette-tile"><span>→</span><strong>右方</strong></button>
+                <button id="btnPlaceTop" class="palette-tile"><span>↑</span><strong>上方</strong></button>
+                <button id="btnPlaceBottom" class="palette-tile"><span>↓</span><strong>下方</strong></button>
                 <button id="btnPlaceFree" class="palette-tile"><span>✥</span><strong>自由定位</strong></button>
               </div>
             </section>
@@ -136,7 +136,7 @@
             </section>
 
             <section class="tool-section" data-tool-group="推拉 折叠 提升 PSK 平行 入墙 转角 上下提拉">
-              <div class="tool-section-head"><h3>推拉与折叠</h3><span>组合开启</span></div>
+              <div class="tool-section-head"><h3>推拉与折叠</h3><span>多扇开启</span></div>
               <div class="palette-grid compact">
                 <button class="palette-tile" data-cell-preset="sliding"><span>⇄</span><strong>普通推拉</strong></button>
                 <button class="palette-tile" data-cell-preset="lift_slide"><span>⇧</span><strong>提升推拉</strong></button>
@@ -265,7 +265,7 @@
           <span class="toolbar-separator" aria-hidden="true"></span>
           <div class="drawing-mode-switch" role="group" aria-label="绘图视图">
             <button id="btnWindowDrawingMode" class="active" aria-pressed="true">单窗</button>
-            <button id="btnAssemblyDrawingMode" aria-pressed="false">组合</button>
+            <button id="btnAssemblyDrawingMode" aria-pressed="false">拼接</button>
           </div>
           <span id="selectionModeLabel" class="toolbar-context">选择模式 · 窗格</span>
         </div>
@@ -303,7 +303,7 @@
           <button class="inspector-tab" data-inspector="installation">安装/包套</button>
           <button class="inspector-tab hidden" data-inspector="member">局部梃</button>
           <button class="inspector-tab hidden" data-inspector="joint">连接节点</button>
-          <button class="inspector-tab hidden" data-inspector="assembly">装配属性</button>
+          <button class="inspector-tab hidden" data-inspector="assembly">拼接属性</button>
         </div>
 
         <div id="inspector-window" class="inspector-pane">
@@ -508,7 +508,7 @@
               </div>
               <div id="openingAssemblyPanel" class="assembly-config">
                 <div class="assembly-config-head">
-                  <h3>组合配置</h3>
+                  <h3>开启配置</h3>
                   <span id="assemblySummary"></span>
                 </div>
                 <div class="form-grid one">
@@ -706,15 +706,15 @@
           <section class="section">
             <div class="inspector-object-head">
               <div>
-                <h2 id="projectAssemblyTitle">门窗组合</h2>
-                <span id="placementWindowLabel">选择组合中的窗体</span>
+                <h2 id="projectAssemblyTitle">门窗拼接</h2>
+                <span id="placementWindowLabel">选择拼接中的窗体</span>
               </div>
-              <button id="btnDeletePlacement" class="danger">移出组合</button>
+              <button id="btnDeletePlacement" class="danger">移出拼接</button>
             </div>
             <div class="form-grid one">
-              <label>当前组合<select id="projectAssemblySelect"></select></label>
-              <label>组合名称<input id="projectAssemblyName" /></label>
-              <label>根窗<select id="projectAssemblyRoot"></select></label>
+              <label>当前拼接<select id="projectAssemblySelect"></select></label>
+              <label>拼接名称<input id="projectAssemblyName" /></label>
+              <label>基准窗<select id="projectAssemblyRoot"></select></label>
               <label>参照窗<select id="placementReference"></select></label>
               <label>停靠位置
                 <select id="placementDock">
@@ -745,10 +745,10 @@
               <label>连接节点<select id="placementJoint"></select></label>
               <label>备注<input id="placementNote" /></label>
             </div>
-            <button id="btnDeleteAssembly" class="danger full-width-action">删除整个组合</button>
+            <button id="btnDeleteAssembly" class="danger full-width-action">删除整组拼接</button>
           </section>
           <section class="section topology-summary">
-            <h2>组合状态</h2>
+            <h2>拼接状态</h2>
             <ul id="projectAssemblySummary" class="mini-list"></ul>
           </section>
         </div>
@@ -897,6 +897,25 @@
       </div>
     </div>
   </dialog>
+  <dialog id="jointPositionDialog" class="joint-position-dialog" aria-labelledby="jointPositionDialogTitle">
+    <div class="joint-position-shell">
+      <header class="joint-position-head">
+        <div>
+          <h2 id="jointPositionDialogTitle">选择窗型位置</h2>
+          <span id="jointPositionSubtitle">请选择新增窗型的方向</span>
+        </div>
+        <button id="btnCloseJointPosition" type="button">关闭</button>
+      </header>
+      <div class="joint-position-map" aria-label="选择窗型位置">
+        <button data-joint-position="top" class="position-top" type="button">上方</button>
+        <button data-joint-position="left" class="position-left" type="button">左方</button>
+        <div class="position-center">当前窗</div>
+        <button data-joint-position="right" class="position-right" type="button">右方</button>
+        <button data-joint-position="bottom" class="position-bottom" type="button">下方</button>
+        <button data-joint-position="free" class="position-free" type="button">自由</button>
+      </div>
+    </div>
+  </dialog>
   <div id="cellContextMenu" class="object-menu cell-object-menu hidden" role="menu" aria-label="窗格快捷操作">
     <div id="cellMenuTitle" class="object-menu-title">窗格操作</div>
     <button data-cell-menu-type="fixed_glass" role="menuitem">设为固定玻璃</button>
@@ -927,14 +946,14 @@
     <button id="btnJointMenuEdit" role="menuitem">编辑连接节点</button>
     <button id="btnJointMenuDelete" class="danger" role="menuitem">删除连接节点</button>
   </div>
-  <div id="assemblyContextMenu" class="object-menu assembly-object-menu hidden" role="menu" aria-label="组合窗体操作">
-    <div id="assemblyMenuTitle" class="object-menu-title">组合窗体</div>
-    <button id="btnAssemblyMenuEdit" role="menuitem">编辑装配属性</button>
-    <button id="btnAssemblyMenuPreview" role="menuitem">查看组合3D</button>
-    <button id="btnAssemblyMenuRemove" class="danger" role="menuitem">移出组合</button>
+  <div id="assemblyContextMenu" class="object-menu assembly-object-menu hidden" role="menu" aria-label="拼接窗体操作">
+    <div id="assemblyMenuTitle" class="object-menu-title">拼接窗体</div>
+    <button id="btnAssemblyMenuEdit" role="menuitem">编辑拼接属性</button>
+    <button id="btnAssemblyMenuPreview" role="menuitem">查看拼接3D</button>
+    <button id="btnAssemblyMenuRemove" class="danger" role="menuitem">移出拼接</button>
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-44"></script>
+  <script type="module" src="assets/app.js?v=20260912-45"></script>
 </body>
 </html>

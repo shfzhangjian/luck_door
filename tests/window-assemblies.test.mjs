@@ -155,8 +155,16 @@ const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf
   "btnPlaceFree",
   "projectAssemblySelect",
   "inspector-assembly",
-  "assemblyContextMenu"
+  "assemblyContextMenu",
+  "jointPositionDialog",
+  "btnCloseJointPosition"
 ].forEach(id => assert.ok(html.includes(`id="${id}"`), `${id} should be available in the drawing workbench`));
+["top", "left", "right", "bottom", "free"].forEach(position => {
+  assert.ok(html.includes(`data-joint-position="${position}"`), `${position} should be available in the joint position dialog`);
+});
+["多窗组合", "新建组合", "左侧组合", "右侧组合", "装配属性"].forEach(copy => {
+  assert.equal(html.includes(copy), false, `${copy} should not appear in the joint-driven interaction`);
+});
 ["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon"].forEach(shapeType => {
   assert.ok(html.includes(`data-shape-preset="${shapeType}"`) || html.includes(`value="${shapeType}"`), `${shapeType} should be exposed as a shape preset`);
 });
@@ -169,5 +177,6 @@ assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames sh
 assert.ok(app.includes("data-edit-custom-shape"), "saved DIY polygon frames should expose a maintenance/edit action");
 assert.ok(app.includes("createConnectedWindow"), "joint-driven placement should auto-create the adjacent frame when needed");
 assert.ok(app.includes("connectionWorkflow: \"joint_driven_auto_frame\""), "runtime capabilities should describe joint-driven frame assembly");
+assert.ok(app.includes("interactionFlow: \"joint_position_dialog\""), "runtime capabilities should describe the joint position dialog flow");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");

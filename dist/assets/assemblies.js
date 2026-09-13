@@ -11,7 +11,7 @@ function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
 }
 
-export function createWindowAssembly(rootWindow, name = "门窗组合") {
+export function createWindowAssembly(rootWindow, name = "门窗拼接") {
   return {
     assemblyId: makeId("WA"),
     name,
@@ -95,7 +95,7 @@ export function normalizeWindowAssembly(source, windows, joints = []) {
 
   return {
     assemblyId: String(source?.assemblyId || makeId("WA")),
-    name: String(source?.name || "门窗组合"),
+    name: String(source?.name || "门窗拼接"),
     rootWindowId,
     placements,
     note: String(source?.note || "")
@@ -244,5 +244,5 @@ export function assemblySummary(assembly, windows) {
 }
 
 export function dockLabel(dock) {
-  return { left: "左侧", right: "右侧", top: "上方", bottom: "下方", free: "自由定位", root: "根窗" }[dock] || dock;
+  return { left: "左方", right: "右方", top: "上方", bottom: "下方", free: "自由定位", root: "基准窗" }[dock] || dock;
 }
