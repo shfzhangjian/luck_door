@@ -193,6 +193,9 @@ assert.ok(app.includes("function renderAssemblyPlanView("), "connected frame ass
 assert.ok(app.includes("assembly-plan-window"), "assembly plan view should show every connected frame footprint");
 assert.ok(app.includes("assembly-plan-joint"), "assembly plan view should show connector and corner relationships");
 assert.ok(app.includes("project.viewOptions?.showPlanView"), "assembly drawing should respect the plan view toggle");
+assert.ok(app.includes("function renderPlanEngineeringJoints("), "single-window plan view should render engineering connector sections");
+assert.ok(app.includes("plan-joint-angle-arc"), "corner connectors should show their turn angle in the plan view");
+assert.ok(app.includes("usedJointIds") && app.includes("joint.hostWindowId === item.windowId"), "assembly elevations should include end connectors even before a second frame is attached");
 assert.ok(app.includes("project.assemblies?.some(assembly => assembly.placements?.length) ? \"assembly\" : \"window\""), "refreshing an assembled project should return to the combined drawing instead of the root window only");
 assert.ok(app.includes("function resolveAssemblyElevationLayout("), "combined drawings should use a flat engineering elevation layout");
 assert.ok(app.includes("assembly-elevation-joint-profile"), "combined elevations should render connector material bands between frames");

@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-50";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-50";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-51";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-51";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-50";
+} from "./openings.js?v=20260912-51";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-50";
+} from "./topology.js?v=20260912-51";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-50";
+} from "./joints.js?v=20260912-51";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-50";
+} from "./assemblies.js?v=20260912-51";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-50";
+} from "./installations.js?v=20260912-51";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -2778,10 +2778,14 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const layout = resolveAssemblyLayout(assembly, project.windows);
       const elevation = resolveAssemblyElevationLayout(assembly, project.windows);
       const elevationBoxes = elevation.items;
-      const minX = Math.min(...elevationBoxes.map(item => item.x));
-      const maxX = Math.max(...elevationBoxes.map(item => item.x + item.w));
-      const minY = Math.min(...elevationBoxes.map(item => item.y));
-      const maxY = Math.max(...elevationBoxes.map(item => item.y + item.h));
+      const elevationExtents = [
+        ...elevationBoxes.map(item => ({ x1: item.x, y1: item.y, x2: item.x + item.w, y2: item.y + item.h })),
+        ...elevation.connectors.map(item => ({ x1: item.x, y1: item.y, x2: item.x + item.w, y2: item.y + item.h }))
+      ];
+      const minX = Math.min(...elevationExtents.map(item => item.x1));
+      const maxX = Math.max(...elevationExtents.map(item => item.x2));
+      const minY = Math.min(...elevationExtents.map(item => item.y1));
+      const maxY = Math.max(...elevationExtents.map(item => item.y2));
       const margin = 86;
       const scale = Math.min(
         (view.w - margin * 2) / Math.max(1, maxX - minX),
@@ -2924,6 +2928,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         window: root
       }]]);
       const connectors = [];
+      const usedJointIds = new Set();
       for (const placement of assembly.placements || []) {
         const win = byId.get(placement.windowId);
         const reference = items.get(placement.referenceWindowId);
@@ -2944,24 +2949,28 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           const top = Math.min(reference.y, y);
           const bottom = Math.max(reference.y + reference.h, y + h);
           connectors.push({ jointId: placement.jointId, orientation: "vertical", x: reference.x + reference.w, y: top, w: Math.max(12, gap), h: bottom - top });
+          if (placement.jointId) usedJointIds.add(placement.jointId);
         } else if (placement.dock === "left") {
           x = reference.x - gap - w;
           y = reference.y + alignOffset + Number(placement.offsetMm || 0);
           const top = Math.min(reference.y, y);
           const bottom = Math.max(reference.y + reference.h, y + h);
           connectors.push({ jointId: placement.jointId, orientation: "vertical", x: x + w, y: top, w: Math.max(12, gap), h: bottom - top });
+          if (placement.jointId) usedJointIds.add(placement.jointId);
         } else if (placement.dock === "top") {
           x = reference.x + (reference.w - w) / 2 + Number(placement.offsetMm || 0);
           y = reference.y - gap - h;
           const left = Math.min(reference.x, x);
           const right = Math.max(reference.x + reference.w, x + w);
           connectors.push({ jointId: placement.jointId, orientation: "horizontal", x: left, y: reference.y - Math.max(12, gap), w: right - left, h: Math.max(12, gap) });
+          if (placement.jointId) usedJointIds.add(placement.jointId);
         } else if (placement.dock === "bottom") {
           x = reference.x + (reference.w - w) / 2 + Number(placement.offsetMm || 0);
           y = reference.y + reference.h + gap;
           const left = Math.min(reference.x, x);
           const right = Math.max(reference.x + reference.w, x + w);
           connectors.push({ jointId: placement.jointId, orientation: "horizontal", x: left, y: reference.y + reference.h, w: right - left, h: Math.max(12, gap) });
+          if (placement.jointId) usedJointIds.add(placement.jointId);
         } else {
           x = reference.x + Number(placement.freePosition?.xMm || 0);
           y = reference.y + Number(placement.freePosition?.yMm || 0);
@@ -2977,6 +2986,24 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           h,
           window: win
         });
+      }
+      for (const item of items.values()) {
+        project.joints
+          .filter(joint => joint.hostWindowId === item.windowId && !usedJointIds.has(joint.jointId))
+          .forEach(joint => {
+            const start = Math.max(0, Math.min(0.98, joint.span?.startRatio ?? 0));
+            const end = Math.max(start + 0.02, Math.min(1, joint.span?.endRatio ?? 1));
+            const legA = Math.max(12, Number(joint.legWidthAMm || 50));
+            if (joint.hostEdge === "left") {
+              connectors.push({ jointId: joint.jointId, orientation: "vertical", x: item.x - legA, y: item.y + item.h * start, w: legA, h: item.h * (end - start) });
+            } else if (joint.hostEdge === "right") {
+              connectors.push({ jointId: joint.jointId, orientation: "vertical", x: item.x + item.w, y: item.y + item.h * start, w: legA, h: item.h * (end - start) });
+            } else if (joint.hostEdge === "top") {
+              connectors.push({ jointId: joint.jointId, orientation: "horizontal", x: item.x + item.w * start, y: item.y - legA, w: item.w * (end - start), h: legA });
+            } else if (joint.hostEdge === "bottom") {
+              connectors.push({ jointId: joint.jointId, orientation: "horizontal", x: item.x + item.w * start, y: item.y + item.h, w: item.w * (end - start), h: legA });
+            }
+          });
       }
       return { items: [...items.values()], connectors };
     }
@@ -3498,11 +3525,69 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           }
         });
       }
+      parts.push(renderPlanEngineeringJoints(win, x, planY, drawW, section));
       if (options.showDimensions) {
         const dimensionY = planY + Math.max(110, extents.inside + 54);
         parts.push(dimensionLine(x, dimensionY, x + drawW, dimensionY, `${Math.round(win.widthMm)} mm`));
       }
       parts.push(`</g>`);
+      return parts.join("");
+    }
+
+    function renderPlanEngineeringJoints(win, x, planY, drawW, section) {
+      const joints = project.joints.filter(joint => joint.hostWindowId === win.windowId);
+      if (!joints.length) return "";
+      const frameTopY = planY - section.frameOutsidePx;
+      const frameBottomY = planY - section.frameInsidePx;
+      const frameHeight = Math.max(8, frameBottomY - frameTopY);
+      const mmToX = drawW / Math.max(1, win.widthMm);
+      const mmToDepth = section.pxPerMm || frameHeight / 70;
+      const parts = [`<g class="plan-engineering-joints">`];
+      joints.forEach(joint => {
+        const vertical = ["left", "right"].includes(joint.hostEdge);
+        const start = Math.max(0, Math.min(0.98, joint.span?.startRatio ?? 0));
+        const end = Math.max(start + 0.02, Math.min(1, joint.span?.endRatio ?? 1));
+        const labelIndex = project.joints.findIndex(item => item.jointId === joint.jointId);
+        const label = joint.type === "corner" ? `T${labelIndex + 1}` : `S${labelIndex + 1}`;
+        const widthPx = Math.max(10, Math.min(42, Number(joint.legWidthAMm || 50) * (vertical ? mmToX : mmToDepth)));
+        const depthPx = Math.max(16, Math.min(66, Number(joint.legWidthBMm || 50) * mmToDepth));
+        const selected = joint.jointId === selectedJointId;
+        if (joint.hostEdge === "left" || joint.hostEdge === "right") {
+          const side = joint.hostEdge === "left" ? -1 : 1;
+          const edgeX = side < 0 ? x : x + drawW;
+          const bandX = side < 0 ? edgeX - widthPx : edgeX;
+          const bandY = frameTopY;
+          parts.push(`<g class="plan-engineering-joint ${selected ? "selected" : ""}" data-joint-id="${escapeHtml(joint.jointId)}">`);
+          parts.push(`<rect class="plan-joint-profile" x="${bandX}" y="${bandY}" width="${widthPx}" height="${frameHeight}" />`);
+          parts.push(`<line class="plan-joint-centerline" x1="${bandX + widthPx / 2}" y1="${bandY}" x2="${bandX + widthPx / 2}" y2="${bandY + frameHeight}" />`);
+          if (joint.type === "corner") {
+            const turnDown = joint.orientation !== "reversed";
+            const returnY = turnDown ? frameBottomY + depthPx : frameTopY - depthPx;
+            const returnTop = Math.min(returnY, frameTopY);
+            const returnHeight = Math.abs(returnY - frameTopY) + frameHeight;
+            parts.push(`<rect class="plan-joint-profile return-leg" x="${bandX}" y="${returnTop}" width="${widthPx}" height="${returnHeight}" />`);
+            const arcR = Math.max(18, Math.min(38, depthPx * 0.72));
+            const arcStartY = turnDown ? frameBottomY + arcR : frameTopY - arcR;
+            const arcEndX = edgeX + side * arcR;
+            const sweep = turnDown ? (side < 0 ? 0 : 1) : (side < 0 ? 1 : 0);
+            parts.push(`<path class="plan-joint-angle-arc" d="M${edgeX} ${arcStartY} A${arcR} ${arcR} 0 0 ${sweep} ${arcEndX} ${turnDown ? frameBottomY : frameTopY}" />`);
+            parts.push(`<text class="plan-joint-angle-label" x="${edgeX + side * (arcR + 10)}" y="${turnDown ? frameBottomY + arcR + 10 : frameTopY - arcR - 4}">${Math.round(joint.angleDeg || 90)}°</text>`);
+          }
+          parts.push(`<text class="plan-joint-label" x="${bandX + widthPx / 2}" y="${frameTopY - 8}">${escapeHtml(label)}</text>`);
+          parts.push(`<text class="plan-joint-size" x="${bandX + widthPx / 2}" y="${frameBottomY + 18}">${Math.round(joint.legWidthAMm || 0)}</text>`);
+          parts.push("</g>");
+          return;
+        }
+        const startX = x + drawW * start;
+        const length = drawW * (end - start);
+        const bandY = joint.hostEdge === "top" ? frameTopY - widthPx : frameBottomY;
+        parts.push(`<g class="plan-engineering-joint ${selected ? "selected" : ""}" data-joint-id="${escapeHtml(joint.jointId)}">`);
+        parts.push(`<rect class="plan-joint-profile" x="${startX}" y="${bandY}" width="${length}" height="${widthPx}" />`);
+        parts.push(`<line class="plan-joint-centerline" x1="${startX}" y1="${bandY + widthPx / 2}" x2="${startX + length}" y2="${bandY + widthPx / 2}" />`);
+        parts.push(`<text class="plan-joint-label" x="${startX + length / 2}" y="${bandY - 8}">${escapeHtml(label)}</text>`);
+        parts.push("</g>");
+      });
+      parts.push("</g>");
       return parts.join("");
     }
 

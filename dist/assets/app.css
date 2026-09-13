@@ -983,6 +983,58 @@
       pointer-events: none;
     }
 
+    .plan-engineering-joints {
+      pointer-events: none;
+    }
+
+    .plan-joint-profile {
+      fill: rgba(133, 137, 149, 0.78);
+      stroke: #364246;
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .plan-engineering-joint.selected .plan-joint-profile {
+      fill: rgba(149, 170, 196, 0.88);
+      stroke: var(--primary);
+      stroke-width: 2.6;
+    }
+
+    .plan-joint-centerline {
+      fill: none;
+      stroke: rgba(95, 110, 120, 0.58);
+      stroke-width: 1;
+      stroke-dasharray: 5 4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .plan-joint-angle-arc {
+      fill: none;
+      stroke: #8a4b00;
+      stroke-width: 1.8;
+      stroke-dasharray: 5 3;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .plan-joint-label,
+    .plan-joint-size,
+    .plan-joint-angle-label {
+      fill: #1e293b;
+      font-size: 10px;
+      font-weight: 750;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 3px;
+      pointer-events: none;
+    }
+
+    .plan-joint-size,
+    .plan-joint-angle-label {
+      fill: #8a4b00;
+      font-size: 9px;
+    }
+
     .plan-track {
       fill: none;
       stroke-width: 2.5;
