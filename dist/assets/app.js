@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-48";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-48";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-49";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-49";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-48";
+} from "./openings.js?v=20260912-49";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-48";
+} from "./topology.js?v=20260912-49";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-48";
+} from "./joints.js?v=20260912-49";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-48";
+} from "./assemblies.js?v=20260912-49";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-48";
+} from "./installations.js?v=20260912-49";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -98,6 +98,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     let lastMainModule = "draw";
     let jointPositionDialogMode = "joint";
     let pendingConnectedShapeType = "rectangular";
+    let canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "" };
+    let canvasViewport = { scale: 1, x: 0, y: 0 };
     let bom = calculateProjectBom(project);
     const diyShapeEditor = {
       points: [],
@@ -1037,7 +1039,10 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           return;
         }
         pendingConnectedShapeType = type;
-        openJointPositionDialog("window", { shapeType: type });
+        canvasCommand = { mode: "add_window_from_joint", jointType: "", jointId: joint.jointId, shapeType: type };
+        drawingMode = "window";
+        render();
+        showToast(`${shapeLabel(type)}将通过${joint.type === "corner" ? "转角料" : "拼接料"}接出，点击虚线区域确认位置，右键退出。`);
         return;
       }
       if (type === "custom_polygon") {
@@ -1158,18 +1163,44 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       showToast("局部中梃已删除。");
     }
 
-    function addEngineeringJoint(type) {
+    function startEngineeringJointPlacement(type) {
+      const win = currentWindow();
+      if (!win) return;
+      closeJointPositionDialog();
+      hideJointContextMenu();
+      hideAssemblyContextMenu();
+      hideMemberContextMenu();
+      canvasCommand = { mode: "add_joint", jointType: type === "corner" ? "corner" : "splice", jointId: "", shapeType: "" };
+      selectedMemberId = "";
+      selectedJointId = "";
+      drawingMode = "window";
+      switchInspector("window");
+      render();
+      showToast(type === "corner"
+        ? "快捷操作提示：点击虚线区域添加转角料，右键退出。"
+        : "快捷操作提示：点击虚线区域添加拼接料，右键退出。");
+    }
+
+    function cancelCanvasCommand(message = "已退出当前绘图命令。") {
+      if (!canvasCommand.mode) return;
+      canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "" };
+      render();
+      showToast(message);
+    }
+
+    function addEngineeringJointAtEdge(type, edge) {
       const win = currentWindow();
       if (!win) return;
       const joint = createEngineeringJoint(type, win, currentSeries(win));
+      joint.hostEdge = hostEdgeForDock(edge);
       project.joints ||= [];
       project.joints.push(joint);
       selectedMemberId = "";
       selectedJointId = joint.jointId;
+      canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "" };
       switchInspector("joint");
       markDirty();
-      openJointPositionDialog("joint");
-      showToast(type === "corner" ? "请选择转角料安装边。" : "请选择拼接料安装边。");
+      showToast(`已在${dockLabel(edge)}增加${joint.type === "corner" ? "转角料" : "拼接料"}，右键可设置角度和料宽。`);
     }
 
     function updateJointFromInputs() {
@@ -2171,6 +2202,117 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         <text class="joint-detail-label" x="130" y="139">${Math.round(angle)}° · A ${Math.round(joint.legWidthAMm)} / B ${Math.round(joint.legWidthBMm)} mm</text>`;
     }
 
+    function openJointSettingsDialog() {
+      const joint = currentJoint();
+      const dialog = document.getElementById("jointSettingsDialog");
+      if (!joint || !dialog) return;
+      hideJointContextMenu();
+      const title = document.getElementById("jointSettingsTitle");
+      if (title) title.textContent = joint.type === "corner" ? "转角设置" : "拼接设置";
+      renderSelect("jointSettingsStyle", JOINT_STYLE_OPTIONS[joint.type].map(item => [item.value, item.label]), joint.style);
+      setValue("jointSettingsOrientation", joint.orientation);
+      renderJointSettingsPreview(joint);
+      dialog.showModal();
+    }
+
+    function closeJointSettingsDialog() {
+      document.getElementById("jointSettingsDialog")?.close();
+    }
+
+    function applyJointSettingsDraft() {
+      const joint = currentJoint();
+      if (!joint) return;
+      joint.style = valueOf("jointSettingsStyle") || joint.style;
+      joint.orientation = valueOf("jointSettingsOrientation") || joint.orientation;
+      renderJointSettingsPreview(joint);
+      renderJointDetailPreview(joint);
+    }
+
+    function saveJointSettingsDialog() {
+      applyJointSettingsDraft();
+      closeJointSettingsDialog();
+      markDirty();
+      showToast("连接件设置已保存。");
+    }
+
+    function promptJointNumericValue(label, currentValue, min, max) {
+      const raw = window.prompt(label, String(Math.round(currentValue)));
+      if (raw === null) return null;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function handleJointSettingsPreviewDoubleClick(event) {
+      const joint = currentJoint();
+      const target = event.target.closest?.("[data-joint-setting]");
+      if (!joint || !target) return;
+      const setting = target.dataset.jointSetting;
+      if (setting === "angle" && joint.type === "corner") {
+        const value = promptJointNumericValue("请输入转角角度", joint.angleDeg, 60, 180);
+        if (value !== null) joint.angleDeg = value;
+      }
+      if (setting === "legA") {
+        const value = promptJointNumericValue("请输入A侧宽度", joint.legWidthAMm, 10, 300);
+        if (value !== null) joint.legWidthAMm = value;
+      }
+      if (setting === "legB") {
+        const value = promptJointNumericValue("请输入B侧宽度", joint.legWidthBMm, 10, 300);
+        if (value !== null) joint.legWidthBMm = value;
+      }
+      renderJointSettingsPreview(joint);
+      renderJointDetailPreview(joint);
+      render();
+    }
+
+    function renderJointSettingsPreview(joint) {
+      const svg = document.getElementById("jointSettingsPreview");
+      if (!svg || !joint) return;
+      const styleLabel = JOINT_STYLE_OPTIONS[joint.type].find(item => item.value === joint.style)?.label || "默认";
+      if (joint.type === "splice") {
+        svg.innerHTML = `
+          <text class="joint-settings-label" x="260" y="34">${escapeHtml(styleLabel)} · ${joint.orientation === "normal" ? "正装" : "反装"}</text>
+          <rect class="joint-settings-window" x="92" y="132" width="138" height="128" />
+          <rect class="joint-settings-window" x="290" y="132" width="138" height="128" />
+          <rect class="joint-settings-profile" x="235" y="116" width="${Math.max(32, Math.min(80, joint.legWidthAMm + joint.legWidthBMm))}" height="160" />
+          <text class="joint-settings-window-label" x="161" y="196">窗框</text>
+          <text class="joint-settings-window-label" x="359" y="196">窗框</text>
+          <g data-joint-setting="legA">
+            <path class="joint-settings-dim-blue" d="M235 92 H${235 + Math.max(32, Math.min(80, joint.legWidthAMm + joint.legWidthBMm))} M235 86 V98 M${235 + Math.max(32, Math.min(80, joint.legWidthAMm + joint.legWidthBMm))} 86 V98" />
+            <text class="joint-settings-dim-text" x="260" y="83">${Math.round(joint.legWidthAMm + joint.legWidthBMm)}</text>
+          </g>`;
+        return;
+      }
+      const angle = Math.max(60, Math.min(180, Number(joint.angleDeg || 90)));
+      const legA = Math.max(28, Math.min(92, Number(joint.legWidthAMm || 50)));
+      const legB = Math.max(28, Math.min(92, Number(joint.legWidthBMm || 50)));
+      const sweep = joint.orientation === "reversed" ? 1 : 0;
+      const curve = joint.style === "curved";
+      const bendPath = curve
+        ? `M260 210 Q${260 + legB} ${210 + legA} ${260 + legB} ${210 + legA}`
+        : `M260 210 L${260 + legB} 210 L${260 + legB} ${210 + legA}`;
+      svg.innerHTML = `
+        <text class="joint-settings-label" x="260" y="34">${escapeHtml(styleLabel)} · ${joint.orientation === "normal" ? "正装" : "反装"}</text>
+        <rect class="joint-settings-window" x="126" y="148" width="112" height="104" />
+        <rect class="joint-settings-window" x="260" y="210" width="112" height="104" />
+        <text class="joint-settings-window-label" x="182" y="202">窗框</text>
+        <text class="joint-settings-window-label" x="316" y="266">窗框</text>
+        <path class="joint-settings-profile" d="${bendPath}" />
+        <circle class="joint-settings-pivot" cx="260" cy="210" r="8" />
+        <g data-joint-setting="legA">
+          <path class="joint-settings-dim-blue" d="M260 126 H${260 + legA} M260 119 V133 M${260 + legA} 119 V133" />
+          <text class="joint-settings-dim-text" x="${260 + legA / 2}" y="114">${Math.round(joint.legWidthAMm)}</text>
+        </g>
+        <g data-joint-setting="legB">
+          <path class="joint-settings-dim-red" d="M${282 + legB} 210 V${210 + legA} M${276 + legB} 210 H${288 + legB} M${276 + legB} ${210 + legA} H${288 + legB}" />
+          <text class="joint-settings-dim-text-red" x="${302 + legB}" y="${210 + legA / 2}" transform="rotate(90 ${302 + legB} ${210 + legA / 2})">${Math.round(joint.legWidthBMm)}</text>
+        </g>
+        <g data-joint-setting="angle">
+          <path class="joint-settings-angle" d="M224 238 A52 52 0 0 ${sweep} 260 286" />
+          <text class="joint-settings-angle-text" x="226" y="270">${Math.round(angle)}°</text>
+        </g>`;
+    }
+
     function renderOpeningAssemblyInputs(cell) {
       const panel = document.getElementById("openingAssemblyPanel");
       const operable = isOperableType(cell.type);
@@ -2423,6 +2565,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
 
       parts.push(renderTopologyMembers(win, rects, face, dividerColor, outlineColor));
       parts.push(renderEngineeringJoints(win, x, y, drawW, drawH));
+      parts.push(renderCanvasCommandZones(win, x, y, drawW, drawH));
 
       if (options.showDimensions) {
         const colTotal = sum(win.layout.columns);
@@ -2446,7 +2589,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         parts.push(renderPlanView(win, rects, x, planY, drawW, outlineColor, frameColor, options));
       }
 
-      svg.innerHTML = parts.join("");
+      setCanvasSvgContent(svg, parts);
       svg.querySelectorAll(".cell").forEach(g => {
         g.addEventListener("click", event => {
           const row = Number(g.dataset.row);
@@ -2526,8 +2669,73 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           if (event.key === "Enter" || event.key === " ") select();
         });
       });
+      svg.querySelectorAll(".joint-placement-zone").forEach(zone => {
+        zone.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleCanvasCommandZone(zone.dataset.edge);
+        });
+        zone.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          cancelCanvasCommand("已退出添加模式。");
+        });
+      });
+      svg.addEventListener("contextmenu", event => {
+        if (!canvasCommand.mode) return;
+        event.preventDefault();
+        cancelCanvasCommand("已退出添加模式。");
+      });
       document.getElementById("drawingTitle").textContent = `${win.mark} · ${win.name || ""}`;
       document.getElementById("drawingStats").textContent = `室外立面 · ${win.widthMm}×${win.heightMm} mm · ${win.layout.columns.length}列${win.layout.rows.length}行 · ${currentSeries(win).name}`;
+    }
+
+    function clampCanvasScale(value) {
+      return Math.max(0.35, Math.min(5, Number(value) || 1));
+    }
+
+    function canvasViewportTransform() {
+      return `translate(${canvasViewport.x.toFixed(3)} ${canvasViewport.y.toFixed(3)}) scale(${canvasViewport.scale.toFixed(4)})`;
+    }
+
+    function setCanvasSvgContent(svg, parts) {
+      const content = Array.isArray(parts) ? parts.join("") : String(parts || "");
+      svg.innerHTML = `<g id="canvasViewport" class="canvas-viewport" transform="${canvasViewportTransform()}">${content}</g>`;
+    }
+
+    function updateCanvasViewportTransform() {
+      document.getElementById("canvasViewport")?.setAttribute("transform", canvasViewportTransform());
+    }
+
+    function svgPointFromMouse(svg, event) {
+      const rect = svg.getBoundingClientRect();
+      const viewBox = svg.viewBox.baseVal;
+      return {
+        x: viewBox.x + (event.clientX - rect.left) * viewBox.width / Math.max(1, rect.width),
+        y: viewBox.y + (event.clientY - rect.top) * viewBox.height / Math.max(1, rect.height)
+      };
+    }
+
+    function handleCanvasWheel(event) {
+      const svg = document.getElementById("windowSvg");
+      if (!svg || event.target.closest?.("input, select, textarea, button")) return;
+      event.preventDefault();
+      const pointer = svgPointFromMouse(svg, event);
+      const previousScale = canvasViewport.scale;
+      const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const nextScale = clampCanvasScale(previousScale * zoomFactor);
+      if (Math.abs(nextScale - previousScale) < 0.001) return;
+      const ratio = nextScale / previousScale;
+      canvasViewport.x = pointer.x - (pointer.x - canvasViewport.x) * ratio;
+      canvasViewport.y = pointer.y - (pointer.y - canvasViewport.y) * ratio;
+      canvasViewport.scale = nextScale;
+      updateCanvasViewportTransform();
+    }
+
+    function bindCanvasWheelZoom() {
+      const svg = document.getElementById("windowSvg");
+      if (!svg) return;
+      svg.addEventListener("wheel", handleCanvasWheel, { passive: false });
     }
 
     function svgPlanDefs() {
@@ -2562,7 +2770,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const assembly = currentProjectAssembly();
       svg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
       if (!assembly) {
-        svg.innerHTML = `<text class="assembly-empty-state" x="450" y="${elevationHeight / 2}">尚未建立门窗拼接</text>`;
+        setCanvasSvgContent(svg, `<text class="assembly-empty-state" x="450" y="${elevationHeight / 2}">尚未建立门窗拼接</text>`);
         document.getElementById("drawingTitle").textContent = "拼接总图";
         document.getElementById("drawingStats").textContent = `${project.windows.length}樘待拼接门窗`;
         return;
@@ -2661,7 +2869,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       if (showPlanView) {
         parts.push(renderAssemblyPlanView(assembly, layout, view.w, elevationHeight + 22, view.h - elevationHeight - 38));
       }
-      svg.innerHTML = parts.join("");
+      setCanvasSvgContent(svg, parts);
 
       const selectGroup = group => {
         selectedWindowId = group.dataset.windowId;
@@ -2836,44 +3044,105 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const joints = project.joints.filter(joint => joint.hostWindowId === win.windowId);
       return joints.map(joint => {
         const globalIndex = project.joints.findIndex(item => item.jointId === joint.jointId);
-        const midpoint = (joint.span.startRatio + joint.span.endRatio) / 2;
-        let anchorX = x;
-        let anchorY = y;
-        let offsetX = 0;
-        let offsetY = 0;
-        if (joint.hostEdge === "right") {
-          anchorX = x + width;
-          anchorY = y + height * midpoint;
-          offsetX = 17;
-        } else if (joint.hostEdge === "left") {
-          anchorX = x;
-          anchorY = y + height * midpoint;
-          offsetX = -17;
-        } else if (joint.hostEdge === "top") {
-          anchorX = x + width * midpoint;
-          anchorY = y;
-          offsetY = -17;
-        } else {
-          anchorX = x + width * midpoint;
-          anchorY = y + height;
-          offsetY = 17;
-        }
-        const markerX = anchorX + offsetX;
-        const markerY = anchorY + offsetY;
+        const start = Math.max(0, Math.min(0.98, joint.span.startRatio));
+        const end = Math.max(start + 0.02, Math.min(1, joint.span.endRatio));
+        const scaleX = width / Math.max(1, win.widthMm);
+        const scaleY = height / Math.max(1, win.heightMm);
+        const vertical = ["left", "right"].includes(joint.hostEdge);
+        const thickness = Math.max(24, Math.min(96, Number(joint.legWidthAMm || 50) * (vertical ? scaleX : scaleY)));
         const selected = joint.jointId === selectedJointId;
-        const radians = Number(joint.angleDeg || 90) * Math.PI / 180;
-        const direction = joint.orientation === "reversed" ? -1 : 1;
-        const guideX = markerX + Math.cos(radians) * 30 * direction;
-        const guideY = markerY - Math.sin(radians) * 30;
+        const label = joint.type === "corner" ? `T${globalIndex + 1}` : `S${globalIndex + 1}`;
+        const turnText = `${Math.round(joint.legWidthAMm)}*${Math.round(joint.legWidthBMm)} ${joint.orientation === "reversed" ? "外转" : "内转"}${Math.round(joint.angleDeg || 180)}°`;
+        let band;
+        let labelX;
+        let labelY;
+        let noteX;
+        let noteY;
+        if (joint.hostEdge === "left") {
+          band = { x: x - thickness, y: y + height * start, w: thickness, h: height * (end - start) };
+          noteX = band.x + band.w / 2;
+          noteY = band.y - 16;
+        } else if (joint.hostEdge === "right") {
+          band = { x: x + width, y: y + height * start, w: thickness, h: height * (end - start) };
+          noteX = band.x + band.w / 2;
+          noteY = band.y - 16;
+        } else if (joint.hostEdge === "top") {
+          band = { x: x + width * start, y: y - thickness, w: width * (end - start), h: thickness };
+          noteX = band.x + band.w / 2;
+          noteY = band.y - 10;
+        } else {
+          band = { x: x + width * start, y: y + height, w: width * (end - start), h: thickness };
+          noteX = band.x + band.w / 2;
+          noteY = band.y + band.h + 18;
+        }
+        labelX = band.x + band.w / 2;
+        labelY = band.y + band.h / 2;
+        const midLine = vertical
+          ? `<line class="engineering-joint-centerline" x1="${band.x + band.w / 2}" y1="${band.y}" x2="${band.x + band.w / 2}" y2="${band.y + band.h}" />`
+          : `<line class="engineering-joint-centerline" x1="${band.x}" y1="${band.y + band.h / 2}" x2="${band.x + band.w}" y2="${band.y + band.h / 2}" />`;
         return `
           <g class="engineering-joint ${selected ? "selected" : ""}" data-joint-id="${escapeHtml(joint.jointId)}" tabindex="0" role="button" aria-label="${joint.type === "corner" ? "转角节点" : "拼接节点"}">
-            <line class="engineering-joint-guide" x1="${anchorX}" y1="${anchorY}" x2="${markerX}" y2="${markerY}" />
-            ${joint.type === "corner" ? `<path class="engineering-joint-guide" d="M${markerX} ${markerY} L${guideX} ${guideY}" />` : ""}
-            <rect class="engineering-joint-hit" x="${markerX - 12}" y="${markerY - 12}" width="24" height="24" />
-            <path class="engineering-joint-shape" d="M${markerX} ${markerY - 9} L${markerX + 9} ${markerY} L${markerX} ${markerY + 9} L${markerX - 9} ${markerY} Z" />
-            <text class="engineering-joint-label" x="${markerX}" y="${markerY}">${jointLabel(joint, globalIndex)}</text>
+            <rect class="engineering-joint-hit" x="${band.x}" y="${band.y}" width="${band.w}" height="${band.h}" />
+            <rect class="engineering-joint-shape" x="${band.x}" y="${band.y}" width="${band.w}" height="${band.h}" />
+            ${midLine}
+            ${selected ? `<rect class="engineering-joint-selection" x="${band.x}" y="${band.y}" width="${band.w}" height="${band.h}" />` : ""}
+            <text class="engineering-joint-label" x="${labelX}" y="${labelY}">${escapeHtml(label)}</text>
+            <text class="engineering-joint-note" x="${noteX}" y="${noteY}">${escapeHtml(turnText)}</text>
           </g>`;
       }).join("");
+    }
+
+    function renderCanvasCommandZones(win, x, y, width, height) {
+      if (!canvasCommand.mode || drawingMode !== "window") return "";
+      const joint = canvasCommand.mode === "add_window_from_joint"
+        ? project.joints.find(item => item.jointId === canvasCommand.jointId)
+        : null;
+      if (canvasCommand.mode === "add_window_from_joint" && (!joint || joint.hostWindowId !== win.windowId)) return "";
+      const edges = canvasCommand.mode === "add_window_from_joint" ? [joint.hostEdge] : ["left", "right", "top", "bottom"];
+      const title = canvasCommand.mode === "add_window_from_joint"
+        ? `${shapeLabel(canvasCommand.shapeType || pendingConnectedShapeType)}接出位置`
+        : `${canvasCommand.jointType === "corner" ? "转角料" : "拼接料"}安装位置`;
+      const zoneW = Math.max(78, width * 0.22);
+      const zoneH = Math.max(70, height * 0.22);
+      const zones = {
+        left: { x: x - zoneW, y, width: zoneW, height },
+        right: { x: x + width, y, width: zoneW, height },
+        top: { x, y: y - zoneH, width, height: zoneH },
+        bottom: { x, y: y + height, width, height: zoneH }
+      };
+      const parts = [`<g class="joint-placement-zones" aria-label="${escapeHtml(title)}">`];
+      edges.forEach(edge => {
+        const zone = zones[edge];
+        if (!zone) return;
+        const labelX = zone.x + zone.width / 2;
+        const labelY = zone.y + zone.height / 2;
+        parts.push(`
+          <g class="joint-placement-zone" data-edge="${edge}" tabindex="0" role="button" aria-label="${escapeHtml(`${title} · ${dockLabel(edge)}`)}">
+            <rect class="joint-placement-zone-box" x="${zone.x}" y="${zone.y}" width="${zone.width}" height="${zone.height}" />
+            <text class="joint-placement-zone-label" x="${labelX}" y="${labelY}">${escapeHtml(dockLabel(edge))}</text>
+          </g>`);
+      });
+      parts.push(`<g class="joint-placement-tip">
+        <rect x="${x - 72}" y="${y + height * 0.44}" width="210" height="44" rx="4" />
+        <text x="${x - 60}" y="${y + height * 0.44 + 17}">快捷操作提示：</text>
+        <text x="${x - 60}" y="${y + height * 0.44 + 33}">点击虚线区域添加，右键退出</text>
+      </g>`);
+      parts.push("</g>");
+      return parts.join("");
+    }
+
+    function handleCanvasCommandZone(edge) {
+      if (!canvasCommand.mode) return;
+      if (canvasCommand.mode === "add_joint") {
+        addEngineeringJointAtEdge(canvasCommand.jointType, edge);
+        return;
+      }
+      if (canvasCommand.mode === "add_window_from_joint") {
+        selectedJointId = canvasCommand.jointId;
+        pendingConnectedShapeType = canvasCommand.shapeType || pendingConnectedShapeType;
+        canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "" };
+        addAssemblyPlacement(edge, { forceCreate: true, shapeType: pendingConnectedShapeType });
+      }
     }
 
     function cellDrawingCode(type, index) {
@@ -3658,6 +3927,9 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       const index = project.joints.findIndex(item => item.jointId === joint.jointId);
       const title = document.getElementById("jointMenuTitle");
       if (title) title.textContent = `${jointLabel(joint, index)} · ${joint.type === "corner" ? "转角料" : "拼接料"}`;
+      menu.querySelectorAll("[data-joint-angle], #btnJointMenuCustomAngle").forEach(item => {
+        item.classList.toggle("hidden", joint.type !== "corner");
+      });
       menu.classList.remove("hidden");
       const left = Math.max(8, Math.min(event.clientX + 10, window.innerWidth - menu.offsetWidth - 8));
       const top = Math.max(8, Math.min(event.clientY + 10, window.innerHeight - menu.offsetHeight - 8));
@@ -3688,6 +3960,23 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
 
     function hideAssemblyContextMenu() {
       document.getElementById("assemblyContextMenu")?.classList.add("hidden");
+    }
+
+    function focusJointInspector(fieldId = "") {
+      if (!currentJoint()) return;
+      hideJointContextMenu();
+      switchInspector("joint");
+      render();
+      if (fieldId) setTimeout(() => document.getElementById(fieldId)?.focus(), 0);
+    }
+
+    function setJointAngleFromMenu(angleDeg) {
+      const joint = currentJoint();
+      if (!joint || joint.type !== "corner") return;
+      joint.angleDeg = Number(angleDeg);
+      hideJointContextMenu();
+      markDirty();
+      showToast(`转角角度已改为 ${joint.angleDeg}°。`);
     }
 
     function applyCellMenuType(type) {
@@ -6851,7 +7140,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
               aligns: ["start", "center", "end"],
               coordinateSystem: "millimeter-3d",
               connectionWorkflow: "joint_driven_auto_frame",
-              interactionFlow: "joint_position_dialog",
+              interactionFlow: "canvas_edge_hotspots",
               autoCreateConnectedWindow: true,
               bomOwnership: "project"
             },
@@ -6953,6 +7242,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function bindEvents() {
+      bindCanvasWheelZoom();
       ["projectId", "projectName", "customerName", "projectAddress", "orderId", "batchNo"].forEach(id => {
         bindById(id, "change", updateProjectFromInputs);
       });
@@ -7088,13 +7378,29 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       document.querySelectorAll("[data-joint-position]").forEach(btn => {
         btn.addEventListener("click", () => chooseJointPosition(btn.dataset.jointPosition));
       });
+      document.querySelectorAll("[data-joint-angle]").forEach(btn => {
+        btn.addEventListener("click", () => setJointAngleFromMenu(btn.dataset.jointAngle));
+      });
+      bindById("btnJointMenuEdit", "click", openJointSettingsDialog);
+      bindById("btnJointMenuLength", "click", () => focusJointInspector("jointLegA"));
+      bindById("btnJointMenuCustomAngle", "click", () => focusJointInspector("jointAngle"));
+      bindById("btnJointMenuReplace", "click", () => focusJointInspector("jointProfile"));
+      bindById("btnCloseJointSettings", "click", closeJointSettingsDialog);
+      bindById("btnCancelJointSettings", "click", closeJointSettingsDialog);
+      bindById("btnSaveJointSettings", "click", saveJointSettingsDialog);
+      bindById("jointSettingsStyle", "change", applyJointSettingsDraft);
+      bindById("jointSettingsOrientation", "change", applyJointSettingsDraft);
+      bindById("jointSettingsPreview", "dblclick", handleJointSettingsPreviewDoubleClick);
+      bindById("jointSettingsDialog", "click", event => {
+        if (event.target === event.currentTarget) closeJointSettingsDialog();
+      });
       bindById("btnConfigureSurround", "click", openInstallationInspector);
       bindById("btnAddCol", "click", () => splitSelectedColumn(2));
       bindById("btnAddRow", "click", () => splitSelectedRow(2));
       bindById("btnAddLocalVertical", "click", () => addLocalMember("vertical"));
       bindById("btnAddLocalHorizontal", "click", () => addLocalMember("horizontal"));
-      bindById("btnAddSpliceJoint", "click", () => addEngineeringJoint("splice"));
-      bindById("btnAddCornerJoint", "click", () => addEngineeringJoint("corner"));
+      bindById("btnAddSpliceJoint", "click", () => startEngineeringJointPlacement("splice"));
+      bindById("btnAddCornerJoint", "click", () => startEngineeringJointPlacement("corner"));
       bindById("btnRemoveCol", "click", removeColumn);
       bindById("btnRemoveRow", "click", removeRow);
       bindById("btnSplitVertical", "click", () => splitSelectedColumn(3));
@@ -7179,10 +7485,6 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       });
       bindById("btnMemberMenuDelete", "click", deleteSelectedMember);
       bindById("btnDeleteJoint", "click", deleteSelectedJoint);
-      bindById("btnJointMenuEdit", "click", () => {
-        hideJointContextMenu();
-        switchInspector("joint");
-      });
       bindById("btnJointMenuDelete", "click", deleteSelectedJoint);
       bindById("btnDeletePlacement", "click", deleteSelectedPlacement);
       bindById("btnDeleteAssembly", "click", deleteCurrentAssembly);

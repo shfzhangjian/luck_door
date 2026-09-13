@@ -6,7 +6,7 @@
   <title>朗科门窗设计大师</title>
   <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-48" />
+  <link rel="stylesheet" href="assets/app.css?v=20260912-49" />
   <script type="importmap">
     {
       "imports": {
@@ -912,6 +912,32 @@
       </div>
     </div>
   </dialog>
+  <dialog id="jointSettingsDialog" class="joint-settings-dialog" aria-labelledby="jointSettingsTitle">
+    <div class="joint-settings-shell">
+      <header class="joint-settings-head">
+        <h2 id="jointSettingsTitle">转角设置</h2>
+        <button id="btnCloseJointSettings" type="button">×</button>
+      </header>
+      <div class="joint-settings-toolbar">
+        <label>选择转角样式
+          <select id="jointSettingsStyle"></select>
+        </label>
+        <label>转角转向
+          <select id="jointSettingsOrientation">
+            <option value="normal">正装</option>
+            <option value="reversed">反装</option>
+          </select>
+        </label>
+        <button id="btnSaveJointSettings" type="button">保存</button>
+        <button id="btnCancelJointSettings" type="button">关闭</button>
+      </div>
+      <div class="joint-settings-tip">
+        <strong>温馨提示：</strong>
+        <span>修改宽度：双击标尺修改转角料宽度；双击角度值可修改角度</span>
+      </div>
+      <svg id="jointSettingsPreview" viewBox="0 0 520 420" role="img" aria-label="转角设置预览"></svg>
+    </div>
+  </dialog>
   <div id="cellContextMenu" class="object-menu cell-object-menu hidden" role="menu" aria-label="窗格快捷操作">
     <div id="cellMenuTitle" class="object-menu-title">窗格操作</div>
     <button data-cell-menu-type="fixed_glass" role="menuitem">设为固定玻璃</button>
@@ -939,7 +965,13 @@
   </div>
   <div id="jointContextMenu" class="object-menu joint-object-menu hidden" role="menu" aria-label="连接节点操作">
     <div id="jointMenuTitle" class="object-menu-title">连接节点</div>
-    <button id="btnJointMenuEdit" role="menuitem">编辑连接节点</button>
+    <button id="btnJointMenuEdit" role="menuitem">转角设置</button>
+    <button id="btnJointMenuLength" role="menuitem">修改料长</button>
+    <button data-joint-angle="90" role="menuitem">修改角度：90</button>
+    <button data-joint-angle="135" role="menuitem">修改角度：135</button>
+    <button data-joint-angle="180" role="menuitem">修改角度：180</button>
+    <button id="btnJointMenuCustomAngle" role="menuitem">修改角度：自定义</button>
+    <button id="btnJointMenuReplace" role="menuitem">更换转角料</button>
     <button id="btnJointMenuDelete" class="danger" role="menuitem">删除连接节点</button>
   </div>
   <div id="assemblyContextMenu" class="object-menu assembly-object-menu hidden" role="menu" aria-label="拼接窗体操作">
@@ -950,6 +982,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-48"></script>
+  <script type="module" src="assets/app.js?v=20260912-49"></script>
 </body>
 </html>
