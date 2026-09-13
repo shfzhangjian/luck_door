@@ -163,6 +163,7 @@ const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf
 ["btnWindowDrawingMode", "btnAssemblyDrawingMode", "多窗组合", "新建组合", "左侧组合", "右侧组合", "装配属性"].forEach(copy => {
   assert.equal(html.includes(copy), false, `${copy} should not appear in the joint-driven interaction`);
 });
+assert.equal(html.includes("palette-tile active"), false, "drawing tools should not remain visually selected by default");
 ["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon"].forEach(shapeType => {
   assert.ok(html.includes(`data-shape-preset="${shapeType}"`) || html.includes(`value="${shapeType}"`), `${shapeType} should be exposed as a shape preset`);
 });
@@ -174,6 +175,8 @@ assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save
 assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames should appear in the drawing tool library");
 assert.ok(app.includes("data-edit-custom-shape"), "saved DIY polygon frames should expose a maintenance/edit action");
 assert.ok(app.includes("createConnectedWindow"), "joint-driven placement should auto-create the adjacent frame when needed");
+assert.ok(app.includes("embeddedInWindowId"), "frames added through a connector should stay inside the current design");
+assert.ok(app.includes("visibleDesignWindows().map"), "bottom cards should only show top-level window designs");
 assert.ok(app.includes('openJointPositionDialog("joint")'), "adding a joint should first ask for the connector side");
 assert.ok(app.includes('openJointPositionDialog("window"'), "choosing a frame preset with a selected joint should ask where the next frame goes");
 assert.ok(app.includes("forceCreate: true"), "adding the next frame through a joint should create a new window");

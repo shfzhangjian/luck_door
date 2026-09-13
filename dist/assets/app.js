@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-46";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-46";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-47";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-47";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-46";
+} from "./openings.js?v=20260912-47";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-46";
+} from "./topology.js?v=20260912-47";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-46";
+} from "./joints.js?v=20260912-47";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-46";
+} from "./assemblies.js?v=20260912-47";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-46";
+} from "./installations.js?v=20260912-47";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -214,6 +214,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         windowId: overrides.windowId || `W-${idPart}`,
         mark: overrides.mark || `C-${String(Date.now()).slice(-4)}`,
         name: overrides.name || "新门窗",
+        embeddedInWindowId: overrides.embeddedInWindowId || "",
         quantity: Number(overrides.quantity || 1),
         widthMm: Number(overrides.widthMm || 1200),
         heightMm: Number(overrides.heightMm || 1500),
@@ -498,6 +499,19 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
 
     function currentWindow() {
       return project.windows.find(w => w.windowId === selectedWindowId) || project.windows[0];
+    }
+
+    function isEmbeddedFrame(win) {
+      return Boolean(win?.embeddedInWindowId);
+    }
+
+    function rootWindowIdFor(win) {
+      return win?.embeddedInWindowId || win?.windowId || "";
+    }
+
+    function visibleDesignWindows() {
+      const roots = project.windows.filter(win => !isEmbeddedFrame(win));
+      return roots.length ? roots : project.windows;
     }
 
     function currentSeries(win = currentWindow()) {
@@ -1292,6 +1306,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       return createWindow({
         mark: nextWindowMark(),
         name: joint?.type === "corner" ? "转角拼接窗" : "拼接窗",
+        embeddedInWindowId: rootWindowIdFor(referenceWindow),
         widthMm: lateral ? 1000 : Number(referenceWindow.widthMm || 1200),
         heightMm: lateral ? Number(referenceWindow.heightMm || 1500) : 1000,
         quantity: Number(referenceWindow.quantity || 1),
@@ -1489,7 +1504,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function newWindow() {
-      const count = project.windows.length + 1;
+      const count = visibleDesignWindows().length + 1;
       const win = createWindow({ mark: `C-${String(count).padStart(2, "0")}`, name: "新门窗" });
       project.windows.push(win);
       selectedWindowId = win.windowId;
@@ -2261,19 +2276,11 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function renderCellPalette() {
-      const cell = currentCell();
       document.querySelectorAll("[data-cell-preset]").forEach(btn => {
-        const preset = btn.dataset.cellPreset;
-        const active = preset === cell?.type
-          || (preset === "grille" && Boolean(cell?.accessories?.grille))
-          || (preset === "screen" && ((cell?.accessories?.screenMode && cell.accessories.screenMode !== "none") || (cell?.openingAssembly?.screenMode && cell.openingAssembly.screenMode !== "none")))
-          || (preset === "louver" && cell?.infillType === "louver")
-          || (preset === "panel" && cell?.infillType === "panel");
-        btn.classList.toggle("active", active);
+        btn.classList.remove("active");
       });
-      const win = currentWindow();
       document.querySelectorAll("[data-shape-preset]").forEach(btn => {
-        btn.classList.toggle("active", btn.dataset.shapePreset === win?.shape?.type);
+        btn.classList.remove("active");
       });
     }
 
@@ -6559,8 +6566,9 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function renderWindowCards() {
-      document.getElementById("windowCards").innerHTML = project.windows.map(win => `
-        <button class="window-card ${win.windowId === selectedWindowId ? "active" : ""}" data-id="${escapeHtml(win.windowId)}">
+      const selectedRootWindowId = rootWindowIdFor(currentWindow());
+      document.getElementById("windowCards").innerHTML = visibleDesignWindows().map(win => `
+        <button class="window-card ${win.windowId === selectedRootWindowId ? "active" : ""}" data-id="${escapeHtml(win.windowId)}">
           <strong>${escapeHtml(win.mark)} · ${escapeHtml(win.name || "门窗")}</strong>
           <span>${win.widthMm}×${win.heightMm} mm · ${win.quantity}樘</span>
           <span>${escapeHtml(win.floor || "-")} / ${escapeHtml(win.room || "-")}</span>
@@ -6629,7 +6637,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function renderBom() {
-      document.getElementById("kpiWindows").textContent = String(project.windows.reduce((n, w) => n + Number(w.quantity || 1), 0));
+      document.getElementById("kpiWindows").textContent = String(visibleDesignWindows().reduce((n, w) => n + Number(w.quantity || 1), 0));
       document.getElementById("kpiLines").textContent = String(bom.mbom.lines.length);
       document.getElementById("kpiCats").textContent = String(new Set(bom.mbom.lines.map(l => l.category)).size);
       document.getElementById("bomSummaryRows").innerHTML = bom.summary.map(row => `
