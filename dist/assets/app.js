@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-45";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-45";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-46";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-46";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-45";
+} from "./openings.js?v=20260912-46";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-45";
+} from "./topology.js?v=20260912-46";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-45";
+} from "./joints.js?v=20260912-46";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-45";
+} from "./assemblies.js?v=20260912-46";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-45";
+} from "./installations.js?v=20260912-46";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -96,6 +96,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     let activeBomTab = "summary";
     let activeModule = "draw";
     let lastMainModule = "draw";
+    let jointPositionDialogMode = "joint";
+    let pendingConnectedShapeType = "rectangular";
     let bom = calculateProjectBom(project);
     const diyShapeEditor = {
       points: [],
@@ -1014,6 +1016,16 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     function applyShapePreset(type) {
       const win = currentWindow();
       if (!win) return;
+      const joint = currentJoint();
+      if (joint) {
+        if (type === "custom_polygon") {
+          showToast("DIY异形窗请先保存为窗型，再接到连接件。");
+          return;
+        }
+        pendingConnectedShapeType = type;
+        openJointPositionDialog("window", { shapeType: type });
+        return;
+      }
       if (type === "custom_polygon") {
         openDiyShapeEditor({ blank: true });
         return;
@@ -1142,8 +1154,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       selectedJointId = joint.jointId;
       switchInspector("joint");
       markDirty();
-      openJointPositionDialog();
-      showToast(type === "corner" ? "已加入转角料，请选择窗型位置。" : "已加入拼接料，请选择窗型位置。");
+      openJointPositionDialog("joint");
+      showToast(type === "corner" ? "请选择转角料安装边。" : "请选择拼接料安装边。");
     }
 
     function updateJointFromInputs() {
@@ -1270,9 +1282,13 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       return `C-${Date.now().toString(36).toUpperCase()}`;
     }
 
-    function createConnectedWindow(referenceWindow, dock, joint) {
+    function createConnectedWindow(referenceWindow, dock, joint, shapeType = "rectangular") {
       const edge = dock === "free" ? hostEdgeForDock(joint?.hostEdge) : hostEdgeForDock(dock);
       const lateral = edge === "left" || edge === "right";
+      const normalizedShape = normalizeWindowShape({
+        type: SHAPE_PRESET_BY_TYPE[shapeType] ? shapeType : "rectangular",
+        archHeightMm: shapeType === "arched" ? 220 : 0
+      });
       return createWindow({
         mark: nextWindowMark(),
         name: joint?.type === "corner" ? "转角拼接窗" : "拼接窗",
@@ -1286,6 +1302,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         colorOutside: referenceWindow.colorOutside,
         defaultGlassTypeId: referenceWindow.defaultGlassTypeId,
         defaultHardwareSetId: referenceWindow.defaultHardwareSetId,
+        shape: normalizedShape,
         layout: {
           columns: [1],
           rows: [1],
@@ -1294,12 +1311,23 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       });
     }
 
-    function openJointPositionDialog() {
+    function openJointPositionDialog(mode = "window", options = {}) {
       const dialog = document.getElementById("jointPositionDialog");
       const joint = currentJoint();
       if (!dialog || !joint) return;
+      jointPositionDialogMode = mode === "joint" ? "joint" : "window";
+      if (options.shapeType) pendingConnectedShapeType = options.shapeType;
+      const title = document.getElementById("jointPositionDialogTitle");
       const subtitle = document.getElementById("jointPositionSubtitle");
-      if (subtitle) subtitle.textContent = `${jointLabel(joint)} · ${joint.type === "corner" ? "转角料" : "拼接料"}`;
+      if (title) title.textContent = jointPositionDialogMode === "joint" ? "选择连接位置" : "选择窗型位置";
+      if (subtitle) {
+        subtitle.textContent = jointPositionDialogMode === "joint"
+          ? `${jointLabel(joint)} · 选择安装在当前窗的哪一边`
+          : `${jointLabel(joint)} · ${shapeLabel(pendingConnectedShapeType)}接到哪一边`;
+      }
+      dialog.querySelectorAll("[data-joint-position]").forEach(button => {
+        button.classList.toggle("hidden", jointPositionDialogMode === "joint" && button.dataset.jointPosition === "free");
+      });
       if (dialog.showModal && !dialog.open) dialog.showModal();
     }
 
@@ -1309,15 +1337,23 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     }
 
     function chooseJointPosition(dock) {
-      if (!currentJoint()) {
+      const joint = currentJoint();
+      if (!joint) {
         showToast("请先选择拼接料或转角料。");
         return;
       }
       closeJointPositionDialog();
-      addAssemblyPlacement(dock);
+      if (jointPositionDialogMode === "joint") {
+        joint.hostEdge = hostEdgeForDock(dock);
+        markDirty();
+        switchInspector("joint");
+        showToast(`已在${dockLabel(dock)}增加${joint.type === "corner" ? "转角料" : "拼接料"}，可设置角度后再选择窗框。`);
+        return;
+      }
+      addAssemblyPlacement(dock, { forceCreate: true, shapeType: pendingConnectedShapeType });
     }
 
-    function addAssemblyPlacement(dock) {
+    function addAssemblyPlacement(dock, options = {}) {
       const selectedJoint = currentJoint();
       const referenceWindow = selectedJoint
         ? project.windows.find(win => win.windowId === selectedJoint.hostWindowId)
@@ -1338,12 +1374,11 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         if (!movingWindow || movingWindow.windowId === referenceWindow.windowId || positioned.has(movingWindow.windowId)) {
           movingWindow = project.windows.find(win => win.windowId !== referenceWindow.windowId && !positioned.has(win.windowId));
         }
-        if (!movingWindow) {
-          movingWindow = createConnectedWindow(referenceWindow, dock, useJoint);
+        if (!movingWindow || options.forceCreate) {
+          movingWindow = createConnectedWindow(referenceWindow, dock, useJoint, options.shapeType);
           project.windows.push(movingWindow);
           createdWindow = true;
         }
-        if (useJoint && dock !== "free") useJoint.hostEdge = hostEdgeForDock(dock);
         const placement = createAssemblyPlacement(movingWindow.windowId, referenceWindow.windowId, dock, {
           gapMm: placementGapForJoint(useJoint),
           rotationDeg: placementRotationForJoint(useJoint),
@@ -1438,7 +1473,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       normalizeProjectAssemblies();
       switchInspector("window");
       markDirty();
-      showToast("门窗拼接关系已删除，单窗设计仍然保留。 ");
+      showToast("门窗拼接关系已删除，原窗设计仍然保留。 ");
     }
 
     function filterToolLibrary() {
@@ -1876,14 +1911,6 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           : member
             ? `选择模式 · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`
             : `选择模式 · ${cell ? `${selectedCell.col + 1}列${selectedCell.row + 1}行` : "窗格"}`;
-      [
-        ["btnWindowDrawingMode", drawingMode === "window"],
-        ["btnAssemblyDrawingMode", drawingMode === "assembly"]
-      ].forEach(([id, active]) => {
-        const button = document.getElementById(id);
-        button?.classList.toggle("active", active);
-        button?.setAttribute("aria-pressed", String(active));
-      });
       setChecked("viewShowOpenState", project.viewOptions.showOpenState);
       setChecked("viewShowProfileColor", project.viewOptions.showProfileColor);
       setChecked("viewShowDimensions", project.viewOptions.showDimensions);
@@ -6916,8 +6943,6 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       bindById("btnNewWindow", "click", newWindow);
       bindById("btnDuplicateWindow", "click", duplicateWindow);
       bindById("btnDeleteWindow", "click", deleteWindow);
-      bindById("btnWindowDrawingMode", "click", () => switchDrawingMode("window"));
-      bindById("btnAssemblyDrawingMode", "click", () => switchDrawingMode("assembly"));
       bindById("btnNewAssembly", "click", newProjectAssembly);
       bindById("btnPlaceLeft", "click", () => addAssemblyPlacement("left"));
       bindById("btnPlaceRight", "click", () => addAssemblyPlacement("right"));

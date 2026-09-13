@@ -144,8 +144,6 @@ assert.ok(schema.$defs.assemblyPlacement);
 const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
 const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf8");
 [
-  "btnWindowDrawingMode",
-  "btnAssemblyDrawingMode",
   "designerCapabilitySummary",
   "btnNewAssembly",
   "btnPlaceLeft",
@@ -162,7 +160,7 @@ const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf
 ["top", "left", "right", "bottom", "free"].forEach(position => {
   assert.ok(html.includes(`data-joint-position="${position}"`), `${position} should be available in the joint position dialog`);
 });
-["多窗组合", "新建组合", "左侧组合", "右侧组合", "装配属性"].forEach(copy => {
+["btnWindowDrawingMode", "btnAssemblyDrawingMode", "多窗组合", "新建组合", "左侧组合", "右侧组合", "装配属性"].forEach(copy => {
   assert.equal(html.includes(copy), false, `${copy} should not appear in the joint-driven interaction`);
 });
 ["trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right", "custom_polygon"].forEach(shapeType => {
@@ -176,6 +174,9 @@ assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save
 assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames should appear in the drawing tool library");
 assert.ok(app.includes("data-edit-custom-shape"), "saved DIY polygon frames should expose a maintenance/edit action");
 assert.ok(app.includes("createConnectedWindow"), "joint-driven placement should auto-create the adjacent frame when needed");
+assert.ok(app.includes('openJointPositionDialog("joint")'), "adding a joint should first ask for the connector side");
+assert.ok(app.includes('openJointPositionDialog("window"'), "choosing a frame preset with a selected joint should ask where the next frame goes");
+assert.ok(app.includes("forceCreate: true"), "adding the next frame through a joint should create a new window");
 assert.ok(app.includes("connectionWorkflow: \"joint_driven_auto_frame\""), "runtime capabilities should describe joint-driven frame assembly");
 assert.ok(app.includes("interactionFlow: \"joint_position_dialog\""), "runtime capabilities should describe the joint position dialog flow");
 
