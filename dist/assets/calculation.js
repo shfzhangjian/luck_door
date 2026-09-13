@@ -1,9 +1,9 @@
-import { typeLabels } from "./catalog.js?v=20260912-43";
-import { isGlassInfillType, isOperableType, normalizeOpeningAssembly } from "./openings.js?v=20260912-43";
-import { findMemberHost, memberLengthMm, normalizeTopology, partitionTopologyRegion } from "./topology.js?v=20260912-43";
-import { JOINT_STYLE_OPTIONS, defaultJointProfile, jointLengthMm, normalizeEngineeringJoints } from "./joints.js?v=20260912-43";
-import { assemblySummary, normalizeWindowAssemblies } from "./assemblies.js?v=20260912-43";
-import { surroundGeometry, surroundSideLabel, surroundSummary } from "./installations.js?v=20260912-43";
+import { typeLabels } from "./catalog.js?v=20260912-44";
+import { isGlassInfillType, isOperableType, normalizeOpeningAssembly } from "./openings.js?v=20260912-44";
+import { findMemberHost, memberLengthMm, normalizeTopology, partitionTopologyRegion } from "./topology.js?v=20260912-44";
+import { JOINT_STYLE_OPTIONS, defaultJointProfile, jointLengthMm, normalizeEngineeringJoints } from "./joints.js?v=20260912-44";
+import { assemblySummary, normalizeWindowAssemblies } from "./assemblies.js?v=20260912-44";
+import { surroundGeometry, surroundSideLabel, surroundSummary } from "./installations.js?v=20260912-44";
 
 export function sum(list) {
       return list.reduce((a, b) => a + Number(b || 0), 0) || 1;

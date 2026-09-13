@@ -41,6 +41,21 @@ export function createAssemblyPlacement(windowId, referenceWindowId, dock = "rig
   };
 }
 
+export function hostEdgeForDock(dock) {
+  return DOCKS.has(dock) && dock !== "free" ? dock : "right";
+}
+
+export function placementGapForJoint(joint) {
+  if (!joint) return 0;
+  return clamp(Math.max(Number(joint.legWidthAMm || 0), Number(joint.legWidthBMm || 0)), 0, 2000, 0);
+}
+
+export function placementRotationForJoint(joint) {
+  if (!joint || joint.type !== "corner") return 0;
+  const angle = clamp(joint.angleDeg, 0, 180, 90);
+  return joint.orientation === "reversed" ? -angle : angle;
+}
+
 export function normalizeWindowAssembly(source, windows, joints = []) {
   const windowIds = new Set((windows || []).map(win => win.windowId));
   if (!windowIds.size) return null;

@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-43";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-43";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-44";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-44";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-43";
+} from "./openings.js?v=20260912-44";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-43";
+} from "./topology.js?v=20260912-44";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,16 +36,19 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-43";
+} from "./joints.js?v=20260912-44";
 import {
   assemblyBounds,
   assemblySummary,
   createAssemblyPlacement,
   createWindowAssembly,
   dockLabel,
+  hostEdgeForDock,
   normalizeWindowAssemblies,
+  placementGapForJoint,
+  placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-43";
+} from "./assemblies.js?v=20260912-44";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -60,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-43";
+} from "./installations.js?v=20260912-44";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -1139,7 +1142,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       selectedJointId = joint.jointId;
       switchInspector("joint");
       markDirty();
-      showToast(type === "corner" ? "已在当前窗右边加入转角节点。" : "已在当前窗右边加入拼接节点。");
+      showToast(type === "corner" ? "已加入转角节点，请选择要拼接的方向。" : "已加入拼接节点，请选择要拼接的方向。");
     }
 
     function updateJointFromInputs() {
@@ -1239,59 +1242,112 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       showToast(`已以${root.mark}作为根窗建立组合。`);
     }
 
-    function addAssemblyPlacement(dock) {
-      if (project.windows.length < 2) {
-        showToast("请先新建或复制第二樘门窗。 ");
-        return;
-      }
+    function assemblyContainsWindow(assembly, windowId) {
+      return assembly?.rootWindowId === windowId || assembly?.placements?.some(item => item.windowId === windowId);
+    }
+
+    function ensureAssemblyForReference(referenceWindow) {
+      project.assemblies ||= [];
       let assembly = currentProjectAssembly();
-      if (!assembly) {
-        assembly = createWindowAssembly(project.windows[0], "门窗组合1");
-        project.assemblies.push(assembly);
-        selectedAssemblyId = assembly.assemblyId;
+      if (!assemblyContainsWindow(assembly, referenceWindow.windowId)) {
+        assembly = project.assemblies.find(item => assemblyContainsWindow(item, referenceWindow.windowId));
       }
-      const existing = assembly.placements.find(item => item.windowId === selectedWindowId);
+      if (!assembly) {
+        assembly = createWindowAssembly(referenceWindow, `门窗组合${project.assemblies.length + 1}`);
+        project.assemblies.push(assembly);
+      }
+      selectedAssemblyId = assembly.assemblyId;
+      return assembly;
+    }
+
+    function nextWindowMark() {
+      const usedMarks = new Set(project.windows.map(win => win.mark));
+      for (let index = project.windows.length + 1; index < project.windows.length + 1000; index += 1) {
+        const mark = `C-${String(index).padStart(2, "0")}`;
+        if (!usedMarks.has(mark)) return mark;
+      }
+      return `C-${Date.now().toString(36).toUpperCase()}`;
+    }
+
+    function createConnectedWindow(referenceWindow, dock, joint) {
+      const edge = dock === "free" ? hostEdgeForDock(joint?.hostEdge) : hostEdgeForDock(dock);
+      const lateral = edge === "left" || edge === "right";
+      return createWindow({
+        mark: nextWindowMark(),
+        name: joint?.type === "corner" ? "转角拼接窗" : "拼接窗",
+        widthMm: lateral ? 1000 : Number(referenceWindow.widthMm || 1200),
+        heightMm: lateral ? Number(referenceWindow.heightMm || 1500) : 1000,
+        quantity: Number(referenceWindow.quantity || 1),
+        floor: referenceWindow.floor,
+        room: referenceWindow.room,
+        seriesId: referenceWindow.seriesId,
+        colorInside: referenceWindow.colorInside,
+        colorOutside: referenceWindow.colorOutside,
+        defaultGlassTypeId: referenceWindow.defaultGlassTypeId,
+        defaultHardwareSetId: referenceWindow.defaultHardwareSetId,
+        layout: {
+          columns: [1],
+          rows: [1],
+          cells: [{ type: "fixed_glass", opening: "fixed" }]
+        }
+      });
+    }
+
+    function addAssemblyPlacement(dock) {
+      const selectedJoint = currentJoint();
+      const referenceWindow = selectedJoint
+        ? project.windows.find(win => win.windowId === selectedJoint.hostWindowId)
+        : currentWindow();
+      if (!referenceWindow) return;
+      const assembly = ensureAssemblyForReference(referenceWindow);
+      let useJoint = selectedJoint && selectedJoint.hostWindowId === referenceWindow.windowId ? selectedJoint : null;
+      let createdWindow = false;
+      let movingWindow = null;
+      const existing = !selectedJoint ? assembly.placements.find(item => item.windowId === selectedWindowId) : null;
       if (existing) {
         existing.dock = dock;
         if (dock !== "free") existing.freePosition = { xMm: 0, yMm: 0, zMm: 0 };
         selectedPlacementId = existing.placementId;
       } else {
         const positioned = new Set([assembly.rootWindowId, ...assembly.placements.map(item => item.windowId)]);
-        let movingWindow = currentWindow();
-        if (!movingWindow || positioned.has(movingWindow.windowId)) {
-          movingWindow = project.windows.find(win => !positioned.has(win.windowId));
+        movingWindow = currentWindow();
+        if (!movingWindow || movingWindow.windowId === referenceWindow.windowId || positioned.has(movingWindow.windowId)) {
+          movingWindow = project.windows.find(win => win.windowId !== referenceWindow.windowId && !positioned.has(win.windowId));
         }
         if (!movingWindow) {
-          showToast("当前组合已包含所有门窗，请先选择组合中的窗体再调整位置。 ");
-          return;
+          movingWindow = createConnectedWindow(referenceWindow, dock, useJoint);
+          project.windows.push(movingWindow);
+          createdWindow = true;
         }
-        const referenceWindowId = assembly.rootWindowId;
-        const selectedJoint = currentJoint();
-        const useJoint = selectedJoint && [selectedJoint.hostWindowId, ...selectedJoint.connectedWindowIds].includes(referenceWindowId)
-          ? selectedJoint
-          : null;
-        const rotationDeg = useJoint?.type === "corner"
-          ? (useJoint.orientation === "reversed" ? -useJoint.angleDeg : useJoint.angleDeg)
-          : 0;
-        const root = project.windows.find(win => win.windowId === referenceWindowId);
-        const placement = createAssemblyPlacement(movingWindow.windowId, referenceWindowId, dock, {
-          rotationDeg,
+        if (useJoint && dock !== "free") useJoint.hostEdge = hostEdgeForDock(dock);
+        const placement = createAssemblyPlacement(movingWindow.windowId, referenceWindow.windowId, dock, {
+          gapMm: placementGapForJoint(useJoint),
+          rotationDeg: placementRotationForJoint(useJoint),
           jointId: useJoint?.jointId || "",
           freePosition: dock === "free"
-            ? { xMm: (Number(root?.widthMm || 0) + Number(movingWindow.widthMm || 0)) / 2 + 300, yMm: 0, zMm: 0 }
+            ? { xMm: (Number(referenceWindow.widthMm || 0) + Number(movingWindow.widthMm || 0)) / 2 + 300, yMm: 0, zMm: 0 }
             : undefined
         });
         assembly.placements.push(placement);
+        if (useJoint) {
+          useJoint.connectedWindowIds = [...new Set([
+            useJoint.hostWindowId,
+            ...useJoint.connectedWindowIds,
+            referenceWindow.windowId,
+            movingWindow.windowId
+          ])];
+        }
         selectedWindowId = movingWindow.windowId;
         selectedPlacementId = placement.placementId;
       }
       selectedMemberId = "";
-      selectedJointId = "";
+      selectedJointId = useJoint?.jointId || "";
       drawingMode = "assembly";
       normalizeProjectAssemblies();
       switchInspector("assembly");
       markDirty();
-      showToast(`当前窗已设置为${dockLabel(dock)}组合。`);
+      const action = createdWindow ? "新增并组合" : "已设置为";
+      showToast(`${movingWindow ? movingWindow.mark : "当前窗"}${action}${dockLabel(dock)}门窗。`);
     }
 
     function updateProjectAssemblyFromInputs() {
@@ -6622,6 +6678,8 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
               docks: ["left", "right", "top", "bottom", "free"],
               aligns: ["start", "center", "end"],
               coordinateSystem: "millimeter-3d",
+              connectionWorkflow: "joint_driven_auto_frame",
+              autoCreateConnectedWindow: true,
               bomOwnership: "project"
             },
             installationSurrounds: {

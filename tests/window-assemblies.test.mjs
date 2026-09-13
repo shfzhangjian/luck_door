@@ -6,7 +6,10 @@ import {
   assemblyBounds,
   assemblySummary,
   createAssemblyPlacement,
+  hostEdgeForDock,
   normalizeWindowAssembly,
+  placementGapForJoint,
+  placementRotationForJoint,
   resolveAssemblyLayout
 } from "../dist/assets/assemblies.js";
 import { createEngineeringJoint } from "../dist/assets/joints.js";
@@ -46,7 +49,9 @@ const cornerJoint = createEngineeringJoint("corner", windows[1], series);
 Object.assign(cornerJoint, {
   jointId: "J-CORNER",
   connectedWindowIds: ["W-B", "W-C"],
-  angleDeg: 90
+  angleDeg: 90,
+  legWidthAMm: 50,
+  legWidthBMm: 100
 });
 const unrelatedJoint = createEngineeringJoint("splice", windows[0], series);
 Object.assign(unrelatedJoint, {
@@ -85,6 +90,10 @@ assert.equal(byWindow.get("W-C").xMm, 2130);
 assert.equal(Math.round(byWindow.get("W-C").zMm), -500);
 assert.equal(byWindow.get("W-D").xMm, -450, "top docking should support start alignment and a horizontal offset");
 assert.equal(byWindow.get("W-D").yMm, 1080);
+assert.equal(hostEdgeForDock("left"), "left", "dock direction should map to the joint host edge");
+assert.equal(placementGapForJoint(cornerJoint), 100, "joint material width should become the assembly gap");
+assert.equal(placementRotationForJoint(cornerJoint), 90, "corner joint angle should drive placement rotation");
+assert.equal(placementRotationForJoint({ ...cornerJoint, orientation: "reversed" }), -90, "reversed corner joints should rotate the adjacent frame back");
 
 const bounds = assemblyBounds(layout);
 assert.deepEqual(
@@ -158,5 +167,7 @@ assert.ok(html.includes('id="diyShapeName"'), "DIY polygon frames should require
 assert.ok(html.includes('id="btnSaveDiyShape"'), "DIY polygon frames should save the drawn model as a named shape element");
 assert.ok(html.includes('id="customShapeLibrary"'), "saved DIY polygon frames should appear in the drawing tool library");
 assert.ok(app.includes("data-edit-custom-shape"), "saved DIY polygon frames should expose a maintenance/edit action");
+assert.ok(app.includes("createConnectedWindow"), "joint-driven placement should auto-create the adjacent frame when needed");
+assert.ok(app.includes("connectionWorkflow: \"joint_driven_auto_frame\""), "runtime capabilities should describe joint-driven frame assembly");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");
