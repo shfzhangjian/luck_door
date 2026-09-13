@@ -1269,6 +1269,58 @@
       pointer-events: none;
     }
 
+    .assembly-elevation-joint {
+      cursor: pointer;
+    }
+
+    .assembly-elevation-joint-profile {
+      fill: #858995;
+      stroke: #526071;
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .assembly-elevation-joint:hover .assembly-elevation-joint-profile,
+    .assembly-elevation-joint.selected .assembly-elevation-joint-profile {
+      stroke: var(--primary);
+      stroke-width: 3;
+    }
+
+    .assembly-elevation-joint.selected .assembly-elevation-joint-profile {
+      fill: #95aac4;
+    }
+
+    .assembly-elevation-joint-centerline {
+      fill: none;
+      stroke: rgba(226, 74, 79, 0.62);
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+      pointer-events: none;
+    }
+
+    .assembly-elevation-joint-label {
+      fill: #1e293b;
+      font-size: 13px;
+      font-weight: 750;
+      text-anchor: middle;
+      dominant-baseline: central;
+      paint-order: stroke;
+      stroke: rgba(255, 255, 255, 0.82);
+      stroke-width: 3px;
+      pointer-events: none;
+    }
+
+    .assembly-elevation-joint-note {
+      fill: #243aa8;
+      font-size: 11px;
+      font-weight: 750;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 3px;
+      pointer-events: none;
+    }
+
     .assembly-link {
       fill: none;
       stroke: #cc7a00;

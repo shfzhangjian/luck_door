@@ -193,5 +193,12 @@ assert.ok(app.includes("function renderAssemblyPlanView("), "connected frame ass
 assert.ok(app.includes("assembly-plan-window"), "assembly plan view should show every connected frame footprint");
 assert.ok(app.includes("assembly-plan-joint"), "assembly plan view should show connector and corner relationships");
 assert.ok(app.includes("project.viewOptions?.showPlanView"), "assembly drawing should respect the plan view toggle");
+assert.ok(app.includes("project.assemblies?.some(assembly => assembly.placements?.length) ? \"assembly\" : \"window\""), "refreshing an assembled project should return to the combined drawing instead of the root window only");
+assert.ok(app.includes("function resolveAssemblyElevationLayout("), "combined drawings should use a flat engineering elevation layout");
+assert.ok(app.includes("assembly-elevation-joint-profile"), "combined elevations should render connector material bands between frames");
+assert.ok(app.includes('svg.querySelectorAll(".assembly-elevation-joint")'), "connector bands in the combined elevation should be directly selectable");
+assert.ok(app.includes("showJointContextMenu(event, group.dataset.jointId)"), "connector bands should expose the same right-click joint commands as the reference workflow");
+assert.ok(app.includes("Math.round(maxX - minX)"), "combined elevation dimensions should be measured from the flat assembly span");
+assert.equal(app.includes("worldZ * 0.42"), false, "combined elevation should not use pseudo-perspective projection");
 
 console.log("Validated multi-window normalization, 3D placement geometry, combined BOM traceability, UI hooks, and the v2 JSON contract.");

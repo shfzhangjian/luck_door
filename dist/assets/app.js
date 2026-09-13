@@ -1,5 +1,5 @@
-import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-49";
-import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-49";
+import { builtInTemplates, categoryLabels, defaultCatalog, typeLabels } from "./catalog.js?v=20260912-50";
+import { buildInterfacePackage, calculateProjectBom, cellIndex, hashString, materialName, sum } from "./calculation.js?v=20260912-50";
 import {
   OPERABLE_TYPES,
   applyOpeningTransform,
@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260912-49";
+} from "./openings.js?v=20260912-50";
 import {
   createCellId,
   createLocalMullion,
@@ -26,7 +26,7 @@ import {
   normalizeMember,
   normalizeTopology,
   partitionTopologyRegion
-} from "./topology.js?v=20260912-49";
+} from "./topology.js?v=20260912-50";
 import {
   JOINT_STYLE_OPTIONS,
   createEngineeringJoint,
@@ -36,7 +36,7 @@ import {
   jointStatus,
   normalizeEngineeringJoint,
   normalizeEngineeringJoints
-} from "./joints.js?v=20260912-49";
+} from "./joints.js?v=20260912-50";
 import {
   assemblyBounds,
   assemblySummary,
@@ -48,7 +48,7 @@ import {
   placementGapForJoint,
   placementRotationForJoint,
   resolveAssemblyLayout
-} from "./assemblies.js?v=20260912-49";
+} from "./assemblies.js?v=20260912-50";
 import {
   FRAME_ALIGNMENT_OPTIONS,
   MOUNTING_MODE_OPTIONS,
@@ -63,7 +63,7 @@ import {
   surroundGeometry,
   surroundSideLabel,
   surroundSummary
-} from "./installations.js?v=20260912-49";
+} from "./installations.js?v=20260912-50";
 
 const STORAGE_KEY = "doormes-designer-v1";
 const THREE_MODULE_URL = "three";
@@ -90,7 +90,7 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
     let selectedJointId = "";
     let selectedAssemblyId = project.assemblies?.[0]?.assemblyId || "";
     let selectedPlacementId = "";
-    let drawingMode = "window";
+    let drawingMode = project.assemblies?.some(assembly => assembly.placements?.length) ? "assembly" : "window";
     let activeLeftTab = "draw";
     let activeInspectorTab = "window";
     let activeBomTab = "summary";
@@ -2776,23 +2776,12 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
         return;
       }
       const layout = resolveAssemblyLayout(assembly, project.windows);
-      const rawPoint = (item, localX, localY) => {
-        const angle = item.rotationDeg * Math.PI / 180;
-        const worldX = item.xMm + Math.cos(angle) * localX;
-        const worldZ = item.zMm - Math.sin(angle) * localX;
-        const worldY = item.yMm + localY;
-        return { x: worldX + worldZ * 0.42, y: -worldY + worldZ * 0.16 };
-      };
-      const rawCorners = layout.flatMap(item => [
-        rawPoint(item, -item.window.widthMm / 2, -item.window.heightMm / 2),
-        rawPoint(item, item.window.widthMm / 2, -item.window.heightMm / 2),
-        rawPoint(item, item.window.widthMm / 2, item.window.heightMm / 2),
-        rawPoint(item, -item.window.widthMm / 2, item.window.heightMm / 2)
-      ]);
-      const minX = Math.min(...rawCorners.map(point => point.x));
-      const maxX = Math.max(...rawCorners.map(point => point.x));
-      const minY = Math.min(...rawCorners.map(point => point.y));
-      const maxY = Math.max(...rawCorners.map(point => point.y));
+      const elevation = resolveAssemblyElevationLayout(assembly, project.windows);
+      const elevationBoxes = elevation.items;
+      const minX = Math.min(...elevationBoxes.map(item => item.x));
+      const maxX = Math.max(...elevationBoxes.map(item => item.x + item.w));
+      const minY = Math.min(...elevationBoxes.map(item => item.y));
+      const maxY = Math.max(...elevationBoxes.map(item => item.y + item.h));
       const margin = 86;
       const scale = Math.min(
         (view.w - margin * 2) / Math.max(1, maxX - minX),
@@ -2800,71 +2789,67 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
       );
       const offsetX = (view.w - (maxX - minX) * scale) / 2 - minX * scale;
       const offsetY = (elevationHeight - (maxY - minY) * scale) / 2 - minY * scale;
-      const point = (item, localX, localY) => {
-        const raw = rawPoint(item, localX, localY);
-        return { x: raw.x * scale + offsetX, y: raw.y * scale + offsetY };
-      };
-      const pointString = points => points.map(item => `${item.x.toFixed(2)},${item.y.toFixed(2)}`).join(" ");
+      const mapElevation = (xMm, yMm) => ({ x: xMm * scale + offsetX, y: yMm * scale + offsetY });
       const parts = [];
 
-      layout.forEach(item => {
-        if (!item.referenceWindowId) return;
-        const reference = layout.find(candidate => candidate.windowId === item.referenceWindowId);
-        if (!reference) return;
-        const from = point(reference, 0, 0);
-        const to = point(item, 0, 0);
-        const placement = assembly.placements.find(candidate => candidate.placementId === item.placementId);
-        const joint = project.joints.find(candidate => candidate.jointId === placement?.jointId);
-        parts.push(`<line class="assembly-link" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" />`);
-        parts.push(`<text class="assembly-link-label" x="${(from.x + to.x) / 2}" y="${(from.y + to.y) / 2 - 8}">${escapeHtml(joint ? jointLabel(joint, project.joints.indexOf(joint)) : dockLabel(item.dock))}</text>`);
+      elevation.connectors.forEach(connector => {
+        const joint = project.joints.find(candidate => candidate.jointId === connector.jointId);
+        const start = mapElevation(connector.x, connector.y);
+        const width = Math.max(8, connector.w * scale);
+        const height = Math.max(8, connector.h * scale);
+        const vertical = connector.orientation === "vertical";
+        const midX = start.x + width / 2;
+        const midY = start.y + height / 2;
+        const jointIndex = project.joints.indexOf(joint);
+        const label = joint ? (joint.type === "corner" ? `T${jointIndex + 1}` : `S${jointIndex + 1}`) : "";
+        const detail = joint
+          ? `${Math.round(joint.legWidthAMm || connector.w)}*${Math.round(joint.legWidthBMm || connector.w)} ${joint.orientation === "reversed" ? "外转" : "内转"}${Math.round(joint.angleDeg || 180)}°`
+          : "";
+        const selected = Boolean(joint && joint.jointId === selectedJointId);
+        parts.push(`<g class="assembly-elevation-joint ${selected ? "selected" : ""}" data-joint-id="${escapeHtml(connector.jointId || "")}" tabindex="0" role="button" aria-label="${escapeHtml(joint ? jointLabel(joint, jointIndex) : "连接节点")}">`);
+        parts.push(`<rect class="assembly-elevation-joint-profile" x="${start.x}" y="${start.y}" width="${width}" height="${height}" />`);
+        parts.push(vertical
+          ? `<line class="assembly-elevation-joint-centerline" x1="${midX}" y1="${start.y}" x2="${midX}" y2="${start.y + height}" />`
+          : `<line class="assembly-elevation-joint-centerline" x1="${start.x}" y1="${midY}" x2="${start.x + width}" y2="${midY}" />`);
+        if (label) parts.push(`<text class="assembly-elevation-joint-label" x="${midX}" y="${midY}">${escapeHtml(label)}</text>`);
+        if (detail) parts.push(`<text class="assembly-elevation-joint-note" x="${midX}" y="${start.y - 10}">${escapeHtml(detail)}</text>`);
+        parts.push("</g>");
       });
 
-      layout.forEach(item => {
+      elevationBoxes.forEach(item => {
         const win = item.window;
         const series = currentSeries(win);
-        const face = Math.min(Number(series.faceWidthMm || 70), win.widthMm * 0.18, win.heightMm * 0.18);
-        const outer = [
-          point(item, -win.widthMm / 2, -win.heightMm / 2),
-          point(item, win.widthMm / 2, -win.heightMm / 2),
-          point(item, win.widthMm / 2, win.heightMm / 2),
-          point(item, -win.widthMm / 2, win.heightMm / 2)
-        ];
-        const inner = [
-          point(item, -win.widthMm / 2 + face, -win.heightMm / 2 + face),
-          point(item, win.widthMm / 2 - face, -win.heightMm / 2 + face),
-          point(item, win.widthMm / 2 - face, win.heightMm / 2 - face),
-          point(item, -win.widthMm / 2 + face, win.heightMm / 2 - face)
-        ];
+        const face = Math.min(Number(series.faceWidthMm || 70), win.widthMm * 0.18, win.heightMm * 0.18) * scale;
+        const topLeft = mapElevation(item.x, item.y);
+        const drawW = item.w * scale;
+        const drawH = item.h * scale;
         const selected = item.placementId ? item.placementId === selectedPlacementId : !selectedPlacementId && win.windowId === selectedWindowId;
         parts.push(`<g class="assembly-window ${selected ? "selected" : ""}" data-window-id="${escapeHtml(win.windowId)}" data-placement-id="${escapeHtml(item.placementId)}" tabindex="0">`);
-        parts.push(`<polygon class="assembly-window-frame" points="${pointString(outer)}" />`);
-        parts.push(`<polygon class="assembly-window-inner" points="${pointString(inner)}" />`);
-        const innerWidth = Math.max(0, win.widthMm - face * 2);
-        const innerHeight = Math.max(0, win.heightMm - face * 2);
+        parts.push(`<rect class="assembly-window-frame" x="${topLeft.x}" y="${topLeft.y}" width="${drawW}" height="${drawH}" />`);
+        parts.push(`<rect class="assembly-window-inner" x="${topLeft.x + face}" y="${topLeft.y + face}" width="${Math.max(0, drawW - face * 2)}" height="${Math.max(0, drawH - face * 2)}" />`);
+        const innerWidth = Math.max(0, drawW - face * 2);
+        const innerHeight = Math.max(0, drawH - face * 2);
         const colTotal = sum(win.layout.columns);
-        let colAt = -innerWidth / 2;
+        let colAt = topLeft.x + face;
         for (let index = 0; index < win.layout.columns.length - 1; index += 1) {
           colAt += innerWidth * win.layout.columns[index] / colTotal;
-          const start = point(item, colAt, -innerHeight / 2);
-          const end = point(item, colAt, innerHeight / 2);
-          parts.push(`<line class="assembly-window-divider" x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" />`);
+          parts.push(`<line class="assembly-window-divider" x1="${colAt}" y1="${topLeft.y + face}" x2="${colAt}" y2="${topLeft.y + drawH - face}" />`);
         }
         const rowTotal = sum(win.layout.rows);
-        let rowAt = -innerHeight / 2;
+        let rowAt = topLeft.y + face;
         for (let index = 0; index < win.layout.rows.length - 1; index += 1) {
           rowAt += innerHeight * win.layout.rows[index] / rowTotal;
-          const start = point(item, -innerWidth / 2, rowAt);
-          const end = point(item, innerWidth / 2, rowAt);
-          parts.push(`<line class="assembly-window-divider" x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" />`);
+          parts.push(`<line class="assembly-window-divider" x1="${topLeft.x + face}" y1="${rowAt}" x2="${topLeft.x + drawW - face}" y2="${rowAt}" />`);
         }
-        const center = point(item, 0, 0);
-        parts.push(`<text class="assembly-window-label" x="${center.x}" y="${center.y}">${escapeHtml(`${win.mark}${item.dock === "root" ? " · 根窗" : ""}`)}</text>`);
+        parts.push(`<text class="assembly-window-label" x="${topLeft.x + drawW / 2}" y="${topLeft.y + drawH / 2}">${escapeHtml(`${win.mark}${item.dock === "root" ? " · 根窗" : ""}`)}</text>`);
         parts.push("</g>");
       });
 
       const bounds = assemblyBounds(layout);
-      parts.push(dimensionLine(margin, elevationHeight - 42, view.w - margin, elevationHeight - 42, `${Math.round(bounds.widthMm)} mm`));
-      parts.push(dimensionLine(view.w - 42, margin, view.w - 42, elevationHeight - margin, `${Math.round(bounds.heightMm)} mm`, true));
+      const elevationMin = mapElevation(minX, minY);
+      const elevationMax = mapElevation(maxX, maxY);
+      parts.push(dimensionLine(elevationMin.x, elevationMax.y + 38, elevationMax.x, elevationMax.y + 38, `${Math.round(maxX - minX)} mm`));
+      parts.push(dimensionLine(elevationMax.x + 44, elevationMin.y, elevationMax.x + 44, elevationMax.y, `${Math.round(maxY - minY)} mm`, true));
       if (bounds.depthMm > 0.5) parts.push(`<text class="sill-height-label" x="${margin}" y="${elevationHeight - 18}">空间进深 ${Math.round(bounds.depthMm)} mm</text>`);
       if (showPlanView) {
         parts.push(renderAssemblyPlanView(assembly, layout, view.w, elevationHeight + 22, view.h - elevationHeight - 38));
@@ -2894,9 +2879,106 @@ const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "r
           if (event.key === "Enter" || event.key === " ") selectGroup(group);
         });
       });
+      svg.querySelectorAll(".assembly-elevation-joint").forEach(group => {
+        const selectJoint = () => {
+          const joint = project.joints.find(item => item.jointId === group.dataset.jointId);
+          if (!joint) return;
+          selectedJointId = joint.jointId;
+          selectedMemberId = "";
+          selectedPlacementId = "";
+          switchInspector("joint");
+          render();
+        };
+        group.addEventListener("click", event => {
+          event.stopPropagation();
+          selectJoint();
+        });
+        group.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          selectJoint();
+          showJointContextMenu(event, group.dataset.jointId);
+        });
+        group.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") selectJoint();
+        });
+      });
       const summary = assemblySummary(assembly, project.windows);
       document.getElementById("drawingTitle").textContent = `${assembly.name} · 拼接总图`;
-      document.getElementById("drawingStats").textContent = `室外立面 · ${summary.windowIds.length}樘 · ${summary.overallWidthMm}×${summary.overallHeightMm}×${summary.overallDepthMm} mm`;
+      document.getElementById("drawingStats").textContent = `室外立面 · ${summary.windowIds.length}樘 · ${Math.round(maxX - minX)}×${Math.round(maxY - minY)}×${summary.overallDepthMm} mm`;
+    }
+
+    function resolveAssemblyElevationLayout(assembly, windows) {
+      const byId = new Map((windows || []).map(win => [win.windowId, win]));
+      const root = byId.get(assembly?.rootWindowId);
+      if (!root) return { items: [], connectors: [] };
+      const items = new Map([[root.windowId, {
+        windowId: root.windowId,
+        placementId: "",
+        referenceWindowId: "",
+        dock: "root",
+        x: 0,
+        y: 0,
+        w: Number(root.widthMm || 0),
+        h: Number(root.heightMm || 0),
+        window: root
+      }]]);
+      const connectors = [];
+      for (const placement of assembly.placements || []) {
+        const win = byId.get(placement.windowId);
+        const reference = items.get(placement.referenceWindowId);
+        if (!win || !reference || items.has(win.windowId)) continue;
+        const gap = Math.max(0, Number(placement.gapMm || 0));
+        const w = Number(win.widthMm || 0);
+        const h = Number(win.heightMm || 0);
+        const alignOffset = placement.align === "start"
+          ? 0
+          : placement.align === "end"
+            ? reference.h - h
+            : (reference.h - h) / 2;
+        let x = reference.x;
+        let y = reference.y;
+        if (placement.dock === "right") {
+          x = reference.x + reference.w + gap;
+          y = reference.y + alignOffset + Number(placement.offsetMm || 0);
+          const top = Math.min(reference.y, y);
+          const bottom = Math.max(reference.y + reference.h, y + h);
+          connectors.push({ jointId: placement.jointId, orientation: "vertical", x: reference.x + reference.w, y: top, w: Math.max(12, gap), h: bottom - top });
+        } else if (placement.dock === "left") {
+          x = reference.x - gap - w;
+          y = reference.y + alignOffset + Number(placement.offsetMm || 0);
+          const top = Math.min(reference.y, y);
+          const bottom = Math.max(reference.y + reference.h, y + h);
+          connectors.push({ jointId: placement.jointId, orientation: "vertical", x: x + w, y: top, w: Math.max(12, gap), h: bottom - top });
+        } else if (placement.dock === "top") {
+          x = reference.x + (reference.w - w) / 2 + Number(placement.offsetMm || 0);
+          y = reference.y - gap - h;
+          const left = Math.min(reference.x, x);
+          const right = Math.max(reference.x + reference.w, x + w);
+          connectors.push({ jointId: placement.jointId, orientation: "horizontal", x: left, y: reference.y - Math.max(12, gap), w: right - left, h: Math.max(12, gap) });
+        } else if (placement.dock === "bottom") {
+          x = reference.x + (reference.w - w) / 2 + Number(placement.offsetMm || 0);
+          y = reference.y + reference.h + gap;
+          const left = Math.min(reference.x, x);
+          const right = Math.max(reference.x + reference.w, x + w);
+          connectors.push({ jointId: placement.jointId, orientation: "horizontal", x: left, y: reference.y + reference.h, w: right - left, h: Math.max(12, gap) });
+        } else {
+          x = reference.x + Number(placement.freePosition?.xMm || 0);
+          y = reference.y + Number(placement.freePosition?.yMm || 0);
+        }
+        items.set(win.windowId, {
+          windowId: win.windowId,
+          placementId: placement.placementId,
+          referenceWindowId: placement.referenceWindowId,
+          dock: placement.dock,
+          x,
+          y,
+          w,
+          h,
+          window: win
+        });
+      }
+      return { items: [...items.values()], connectors };
     }
 
     function assemblyPlanPoint(item, localX, localZ = 0) {
