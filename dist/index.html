@@ -6,7 +6,7 @@
   <title>朗科云设计</title>
   <meta name="description" content="朗科云设计门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260914-10" />
+  <link rel="stylesheet" href="assets/app.css?v=20260914-11" />
   <script type="importmap">
     {
       "imports": {
@@ -320,7 +320,16 @@
             <div class="canvas-shell">
               <button id="canvasPanHandle" class="canvas-pan-handle" type="button" aria-label="拖动画布位置"><span aria-hidden="true">✥</span></button>
               <svg id="windowSvg" class="window-canvas" viewBox="0 0 900 760" role="img" aria-label="门窗绘制画布"></svg>
-              <input id="canvasDimensionInput" class="canvas-dimension-input hidden" type="number" />
+              <div id="canvasDimensionEditor" class="canvas-dimension-editor hidden" role="dialog" aria-label="设置尺寸">
+                <label>
+                  <span id="canvasDimensionLabel">尺寸 mm</span>
+                  <input id="canvasDimensionInput" class="canvas-dimension-input" type="number" />
+                </label>
+                <div class="canvas-dimension-actions">
+                  <button id="btnApplyCanvasDimension" type="button" class="primary">确认应用</button>
+                  <button id="btnCancelCanvasDimension" type="button">取消</button>
+                </div>
+              </div>
               <input id="canvasMarkupInput" class="canvas-markup-input hidden" type="text" aria-label="编辑标注或玻璃孔参数" />
               <div class="drawing-view-options" role="group" aria-label="图纸显示选项">
                 <label><input id="viewShowOpenState" type="checkbox" />开启状态</label>
@@ -1383,6 +1392,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260914-10"></script>
+  <script type="module" src="assets/app.js?v=20260914-11"></script>
 </body>
 </html>

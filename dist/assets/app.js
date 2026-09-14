@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260914-10";
+} from "./openings.js?v=20260914-11";
 import {
   createCellId,
   createMemberId,
@@ -4631,58 +4631,79 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             startHeight: win.heightMm,
             startColumns: [...win.layout.columns],
             startRows: [...win.layout.rows],
+            changed: false,
             moved: false
           };
-          handle.setPointerCapture?.(event.pointerId);
+          const move = moveEvent => updateGeometryDrag(svg, moveEvent);
+          const up = upEvent => {
+            finishGeometryDrag(svg, upEvent);
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          geometryDrag.cleanup = () => {
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          document.addEventListener("pointermove", move, true);
+          document.addEventListener("pointerup", up, true);
+          document.addEventListener("pointercancel", up, true);
         });
-        handle.addEventListener("pointermove", event => {
-          if (!geometryDrag || geometryDrag.pointerId !== event.pointerId || geometryDrag.windowId !== handle.dataset.geometryWindow) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const point = canvasPointFromMouse(svg, event);
-          const dx = point.x - geometryDrag.startPoint.x;
-          const dy = point.y - geometryDrag.startPoint.y;
-          geometryDrag.moved ||= Math.hypot(dx, dy) > 2;
-          const delta = geometryDrag.axis === "height" || geometryDrag.axis === "row" ? dy : dx;
-          handle.setAttribute("transform", `translate(${geometryDrag.axis === "height" || geometryDrag.axis === "row" ? 0 : delta} ${geometryDrag.axis === "height" || geometryDrag.axis === "row" ? delta : 0})`);
-        });
-        const finish = event => {
-          if (!geometryDrag || geometryDrag.pointerId !== event.pointerId || geometryDrag.windowId !== handle.dataset.geometryWindow) return;
-          event.preventDefault();
-          event.stopPropagation();
-          handle.releasePointerCapture?.(event.pointerId);
-          handle.removeAttribute("transform");
-          const drag = geometryDrag;
-          geometryDrag = null;
-          if (!drag.moved) return;
-          const win = project.windows.find(item => item.windowId === drag.windowId);
-          if (!win) return;
-          const point = canvasPointFromMouse(svg, event);
-          const deltaPx = drag.axis === "height" || drag.axis === "row" ? point.y - drag.startPoint.y : point.x - drag.startPoint.x;
-          const deltaMm = deltaPx / drag.unitScale;
-          if (drag.kind === "window") {
-            if (drag.axis === "width") win.widthMm = Math.max(300, Math.round(drag.startWidth + deltaMm));
-            if (drag.axis === "height") win.heightMm = Math.max(300, Math.round(drag.startHeight + deltaMm));
-          } else {
-            const weights = drag.axis === "column" ? drag.startColumns : drag.startRows;
-            const spanMm = drag.axis === "column" ? drag.startWidth : drag.startHeight;
-            const total = sum(weights);
-            const sizes = weights.map(value => value / total * spanMm);
-            const index = Math.max(0, Math.min(weights.length - 2, drag.index));
-            const pairTotal = sizes[index] + sizes[index + 1];
-            sizes[index] = Math.max(120, Math.min(pairTotal - 120, sizes[index] + deltaMm));
-            sizes[index + 1] = pairTotal - sizes[index];
-            if (drag.axis === "column") win.layout.columns = sizes;
-            else win.layout.rows = sizes;
-          }
-          selectedWindowId = win.windowId;
-          selectedPlacementId = currentProjectAssembly()?.placements?.find(item => item.windowId === win.windowId)?.placementId || "";
-          markDirty();
-          showToast(drag.kind === "window" ? "窗框尺寸已更新。" : "中梃分格比例已更新。");
-        };
-        handle.addEventListener("pointerup", finish);
-        handle.addEventListener("pointercancel", finish);
       });
+    }
+
+    function applyGeometryDragDelta(drag, deltaMm) {
+      const win = project.windows.find(item => item.windowId === drag.windowId);
+      if (!win) return false;
+      if (drag.kind === "window") {
+        if (drag.axis === "width") win.widthMm = Math.max(300, Math.round(drag.startWidth + deltaMm));
+        if (drag.axis === "height") win.heightMm = Math.max(300, Math.round(drag.startHeight + deltaMm));
+      } else {
+        const weights = drag.axis === "column" ? drag.startColumns : drag.startRows;
+        if (weights.length < 2) return false;
+        const spanMm = drag.axis === "column" ? drag.startWidth : drag.startHeight;
+        const total = sum(weights);
+        const sizes = weights.map(value => value / total * spanMm);
+        const index = Math.max(0, Math.min(weights.length - 2, drag.index));
+        const pairTotal = sizes[index] + sizes[index + 1];
+        if (pairTotal <= 240) return false;
+        sizes[index] = Math.max(120, Math.min(pairTotal - 120, sizes[index] + deltaMm));
+        sizes[index + 1] = pairTotal - sizes[index];
+        if (drag.axis === "column") win.layout.columns = sizes;
+        else win.layout.rows = sizes;
+      }
+      selectedWindowId = win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(item => item.windowId === win.windowId)?.placementId || "";
+      return true;
+    }
+
+    function updateGeometryDrag(svg, event) {
+      if (!geometryDrag || geometryDrag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = canvasPointFromMouse(svg, event);
+      const dx = point.x - geometryDrag.startPoint.x;
+      const dy = point.y - geometryDrag.startPoint.y;
+      geometryDrag.moved ||= Math.hypot(dx, dy) > 2;
+      if (!geometryDrag.moved) return;
+      const deltaPx = geometryDrag.axis === "height" || geometryDrag.axis === "row" ? dy : dx;
+      const changed = applyGeometryDragDelta(geometryDrag, deltaPx / geometryDrag.unitScale);
+      if (!changed) return;
+      geometryDrag.changed = true;
+      render();
+    }
+
+    function finishGeometryDrag(svg, event) {
+      if (!geometryDrag || geometryDrag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const drag = geometryDrag;
+      geometryDrag.cleanup?.();
+      geometryDrag = null;
+      if (!drag.moved || !drag.changed) return;
+      markDirty();
+      showToast(drag.kind === "window" ? "窗框尺寸已更新。" : "中梃分格比例已更新。");
     }
 
     function updateCanvasViewportTransform() {
@@ -5031,9 +5052,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
     function hideCanvasDimensionEditor() {
+      const editor = document.getElementById("canvasDimensionEditor");
       const input = document.getElementById("canvasDimensionInput");
+      if (editor) editor.classList.add("hidden");
       if (!input) return;
-      input.classList.add("hidden");
       input.dataset.target = "";
       input.dataset.min = "";
       input.dataset.max = "";
@@ -5042,7 +5064,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function commitCanvasDimensionEditor() {
       const input = document.getElementById("canvasDimensionInput");
       const win = currentWindow();
-      if (!input || input.classList.contains("hidden") || !win) return;
+      const editor = document.getElementById("canvasDimensionEditor");
+      if (!input || !editor || editor.classList.contains("hidden") || !win) return;
       const target = input.dataset.target;
       const min = Number(input.dataset.min);
       const max = Number(input.dataset.max);
@@ -5064,22 +5087,25 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function openCanvasDimensionEditor(target, event) {
       const meta = canvasDimensionMeta(target);
       const input = document.getElementById("canvasDimensionInput");
+      const editor = document.getElementById("canvasDimensionEditor");
+      const label = document.getElementById("canvasDimensionLabel");
       const shell = document.querySelector(".canvas-shell");
-      if (!meta || !input || !shell) return;
+      if (!meta || !input || !editor || !shell) return;
       const box = shell.getBoundingClientRect();
-      const left = Math.max(8, Math.min(box.width - 136, event.clientX - box.left + 10));
-      const top = Math.max(8, Math.min(box.height - 36, event.clientY - box.top - 14));
+      const left = Math.max(8, Math.min(box.width - 198, event.clientX - box.left + 10));
+      const top = Math.max(8, Math.min(box.height - 116, event.clientY - box.top - 14));
       input.dataset.target = meta.target;
       input.dataset.min = String(meta.min);
       input.dataset.max = String(meta.max);
       input.setAttribute("aria-label", meta.label);
+      if (label) label.textContent = `${meta.label} mm`;
       input.min = String(meta.min);
       input.max = String(meta.max);
       input.step = "1";
       input.value = String(Math.round(meta.current));
-      input.style.left = `${left}px`;
-      input.style.top = `${top}px`;
-      input.classList.remove("hidden");
+      editor.style.left = `${left}px`;
+      editor.style.top = `${top}px`;
+      editor.classList.remove("hidden");
       input.focus();
       input.select();
     }
@@ -7285,12 +7311,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       const left = opening?.startsWith("left");
       const out = opening?.endsWith("out");
-      const x1 = left ? item.x + inset : item.x + item.w - inset;
-      const y1 = item.y + inset;
-      const x2 = left ? item.x + item.w - inset : item.x + inset;
-      const y2 = item.y + item.h - inset;
+      const hingeX = left ? item.x + inset : item.x + item.w - inset;
+      const openX = left ? item.x + item.w - inset : item.x + inset;
+      const hingeY = item.y + item.h / 2;
       const dash = out ? "" : "stroke-dasharray='7 5'";
-      return `<path d="M${x1} ${y1} L${x2} ${y2} L${x1} ${y2} Z" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
+      return `<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
     }
 
     function dimensionLine(x1, y1, x2, y2, label, vertical = false, editTarget = "") {
@@ -11208,7 +11233,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         if (event.key === "Enter") commitCanvasDimensionEditor();
         if (event.key === "Escape") hideCanvasDimensionEditor();
       });
-      bindById("canvasDimensionInput", "blur", commitCanvasDimensionEditor);
+      bindById("btnApplyCanvasDimension", "click", commitCanvasDimensionEditor);
+      bindById("btnCancelCanvasDimension", "click", hideCanvasDimensionEditor);
       bindById("canvasMarkupInput", "keydown", event => {
         if (event.key === "Enter") commitCanvasMarkupEditor();
         if (event.key === "Escape") hideCanvasMarkupEditor();

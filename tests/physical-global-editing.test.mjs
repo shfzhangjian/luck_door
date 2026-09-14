@@ -88,6 +88,21 @@ assert.ok(
   "3D sash geometry must sit in a frame rebate pocket, stay selected by default, and rotate from a frame-mounted hinge mechanism."
 );
 assert.ok(css.includes(".geometry-drag-handle") && css.includes(".internal-joint-zone"), "Canvas geometry and internal-joint hit targets must be styled and discoverable.");
+assert.ok(
+  html.includes("canvasDimensionEditor") &&
+  html.includes("btnApplyCanvasDimension") &&
+  app.includes("function applyGeometryDragDelta") &&
+  app.includes("document.addEventListener(\"pointermove\", move, true)") &&
+  app.includes("render();") &&
+  app.includes('bindById("btnApplyCanvasDimension", "click", commitCanvasDimensionEditor)') &&
+  !app.includes('bindById("canvasDimensionInput", "blur", commitCanvasDimensionEditor)'),
+  "Canvas dimension dragging must live-update the whole window, and double-click editing must require explicit confirmation."
+);
+assert.ok(
+  app.includes("const hingeX = left ? item.x + inset : item.x + item.w - inset") &&
+  app.includes("M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}"),
+  "Side-hung 2D symbols must use the reference V-shaped opening mark instead of a single diagonal triangle."
+);
 assert.ok(css.includes('.preview-visibility input[type="checkbox"]') && css.includes("flex: 0 0 16px"), "3D visibility checkboxes must override the global full-width form-input rule.");
 assert.ok(!css.includes(".preview-mode-fixed"), "The obsolete 3D multi-select banner style must be removed.");
 

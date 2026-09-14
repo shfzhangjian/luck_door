@@ -3528,6 +3528,48 @@
       fill: #2458ff;
     }
 
+    .canvas-dimension-editor {
+      position: absolute;
+      z-index: 8;
+      width: 190px;
+      padding: 10px;
+      border: 1px solid #9fc4ef;
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+    }
+
+    .canvas-dimension-editor label {
+      display: grid;
+      gap: 5px;
+      color: #36526b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .canvas-dimension-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .canvas-dimension-actions button {
+      min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .canvas-dimension-actions .primary {
+      border-color: #1d7df2;
+      background: #1d7df2;
+      color: #fff;
+    }
+
     .canvas-dimension-input,
     .canvas-markup-input {
       position: absolute;
@@ -3542,6 +3584,13 @@
       font-size: 15px;
       font-weight: 700;
       box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
+    }
+
+    .canvas-dimension-editor .canvas-dimension-input {
+      position: static;
+      width: 100%;
+      height: 30px;
+      box-shadow: none;
     }
 
     .canvas-markup-input {
