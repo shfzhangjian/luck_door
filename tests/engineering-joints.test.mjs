@@ -4,6 +4,7 @@ import { defaultCatalog } from "../dist/assets/catalog.js";
 import { calculateProjectBom } from "../dist/assets/calculation.js";
 import {
   createEngineeringJoint,
+  jointLabel,
   jointLengthMm,
   jointStatus,
   normalizeEngineeringJoint,
@@ -60,9 +61,19 @@ const postless = normalizeEngineeringJoint({
   postMode: "postless",
   span: { startRatio: 0, endRatio: 0.5 }
 }, new Set(windows.map(win => win.windowId)));
+const giant = normalizeEngineeringJoint({
+  ...corner,
+  jointId: "J-GIANT",
+  style: "giant"
+}, new Set(windows.map(win => win.windowId)));
 
 assert.equal(corner.profileId, "AL70-CORNER-90", "corner joints should inherit the series corner profile");
 assert.equal(splice.profileId, "AL70-SPLICE", "splice joints should inherit the series splice profile");
+assert.equal(corner.legWidthAMm, 100, "corner joints should default to the reference 100 mm A-side width");
+assert.equal(corner.legWidthBMm, 100, "corner joints should default to the reference 100 mm B-side width");
+assert.equal(splice.legWidthAMm, 50, "splice joints should keep the narrow 50 mm default width");
+assert.equal(jointLabel(corner, 0), "T1", "corner joints should use the reference T-numbering");
+assert.equal(jointLabel(splice, 0), "S1", "splice joints should use S-numbering");
 assert.equal(jointLengthMm(corner, windows[0]), 1500, "vertical edge joints should use the window height");
 assert.equal(jointLengthMm(splice, windows[0]), 1440, "horizontal partial joints should use the selected width span");
 assert.equal(jointStatus(corner).label, "已连接2樘窗", "joint status should report connected windows");
@@ -77,6 +88,8 @@ const normalized = normalizeEngineeringJoints([
 assert.equal(normalized.length, 3, "normalization should remove orphan and duplicate engineering joints");
 assert.equal(normalized[0].angleDeg, 135, "corner angle should survive normalization");
 assert.equal(normalized[1].angleDeg, 180, "splice joints should always normalize to 180 degrees");
+assert.equal(normalized[0].aliasDisplay, "alias", "joint alias display should normalize to a persisted default");
+assert.equal(giant.style, "giant", "corner joints should accept the reference giant-corner style");
 
 const bom = calculateProjectBom({
   catalog: structuredClone(defaultCatalog),
@@ -115,6 +128,7 @@ assert.ok(
 const schema = JSON.parse(readFileSync(new URL("../docs/door-window-design.v2.schema.json", import.meta.url), "utf8"));
 assert.ok(schema.required.includes("joints"), "v2 projects should explicitly carry project-level joints");
 assert.ok(schema.$defs.engineeringJoint, "v2 schema should define engineering joints");
+assert.ok(schema.$defs.engineeringJoint.properties.aliasDisplay, "v2 schema should persist connector alias display mode");
 
 const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
 [

@@ -47,6 +47,7 @@ export function hostEdgeForDock(dock) {
 
 export function placementGapForJoint(joint) {
   if (!joint) return 0;
+  if (joint.type === "splice") return clamp(joint.legWidthAMm, 0, 2000, 0);
   return clamp(Math.max(Number(joint.legWidthAMm || 0), Number(joint.legWidthBMm || 0)), 0, 2000, 0);
 }
 

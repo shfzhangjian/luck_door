@@ -17,6 +17,9 @@
         "projectId": { "type": "string" },
         "name": { "type": "string" },
         "customerName": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "status": { "type": "string", "enum": ["new", "designing", "review", "confirmed"] },
+        "createdAt": { "type": "string" },
         "address": { "type": "string" }
       },
       "additionalProperties": true
@@ -60,6 +63,11 @@
     "componentLibrary": {
       "type": "array",
       "items": { "$ref": "#/$defs/componentTemplate" }
+    },
+    "measurements": {
+      "type": "array",
+      "description": "手机量房图或现场洞口记录，作为生成窗型的输入来源。",
+      "items": { "$ref": "#/$defs/measurementOpening" }
     },
     "customShapes": {
       "type": "array",
@@ -193,6 +201,21 @@
         "description": { "type": "string" },
         "source": { "type": "string" },
         "window": { "$ref": "#/$defs/windowTemplate" }
+      },
+      "additionalProperties": true
+    },
+    "measurementOpening": {
+      "type": "object",
+      "required": ["measurementId", "openingName", "widthMm", "heightMm"],
+      "properties": {
+        "measurementId": { "type": "string" },
+        "room": { "type": "string" },
+        "openingName": { "type": "string" },
+        "widthMm": { "type": "number", "minimum": 300 },
+        "heightMm": { "type": "number", "minimum": 300 },
+        "sillHeightMm": { "type": "number", "minimum": 0 },
+        "status": { "type": "string" },
+        "note": { "type": "string" }
       },
       "additionalProperties": true
     },
@@ -345,7 +368,10 @@
         "showOpenState": { "type": "boolean" },
         "showProfileColor": { "type": "boolean" },
         "showDimensions": { "type": "boolean" },
-        "showPlanView": { "type": "boolean" }
+        "showPlanView": { "type": "boolean" },
+        "show3dDimensions": { "type": "boolean" },
+        "show3dMarkups": { "type": "boolean" },
+        "show3dOrientation": { "type": "boolean" }
       },
       "additionalProperties": true
     },
@@ -468,7 +494,7 @@
       "properties": {
         "jointId": { "type": "string" },
         "type": { "type": "string", "enum": ["splice", "corner"] },
-        "style": { "type": "string", "enum": ["flat", "reinforced", "default", "curved", "universal", "rectangular"] },
+        "style": { "type": "string", "enum": ["flat", "reinforced", "default", "curved", "universal", "rectangular", "giant"] },
         "orientation": { "type": "string", "enum": ["normal", "reversed"] },
         "hostWindowId": { "type": "string" },
         "hostEdge": { "type": "string", "enum": ["left", "right", "top", "bottom"] },
@@ -492,11 +518,16 @@
         },
         "profileId": { "type": "string" },
         "frameTreatment": { "type": "string", "enum": ["keep_both", "shared_frame", "connector_only"] },
-        "postMode": { "type": "string", "enum": ["profile", "postless"] },
-        "fastenerSpacingMm": { "type": "number", "minimum": 100, "maximum": 1000 },
-        "note": { "type": "string" }
-      },
-      "additionalProperties": true
+          "postMode": { "type": "string", "enum": ["profile", "postless"] },
+          "fastenerSpacingMm": { "type": "number", "minimum": 100, "maximum": 1000 },
+          "aliasDisplay": {
+            "type": "string",
+            "description": "2D图中连接型材的文字显示方式。",
+            "enum": ["code", "alias", "all", "hidden"]
+          },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": true
     },
     "windowAssembly": {
       "type": "object",
@@ -606,6 +637,11 @@
         "glassTypeId": { "type": "string" },
         "hardwareSetId": { "type": "string" },
         "panelTypeId": { "type": "string" },
+        "panelMode": {
+          "type": "string",
+          "description": "板材填充的单扇或双扇表达；只在 infillType=panel 时生效。",
+          "enum": ["single", "double"]
+        },
         "infillType": {
           "type": "string",
           "description": "窗格或开启扇内部填充；不改变主体开启方式。",
@@ -618,14 +654,39 @@
             "grille": { "type": "boolean" },
             "screenMode": { "type": "string", "enum": ["none", "fixed", "swing", "sliding", "retractable"] },
             "securityBars": { "type": "boolean" },
+            "guardRail": { "type": "boolean" },
             "frosted": { "type": "boolean" }
           },
           "additionalProperties": true
         },
         "handleHeightMm": { "type": "number", "minimum": 0 },
+        "markups": {
+          "type": "array",
+          "description": "绑定在当前窗格宿主上的文字、孔位与锁具对象。",
+          "items": { "$ref": "#/$defs/cellMarkup" }
+        },
         "note": { "type": "string" }
       },
       "additionalProperties": true
+    },
+    "cellMarkup": {
+      "type": "object",
+      "required": ["markupId", "kind", "hostType", "hostWindowId", "hostCellId", "xPercent", "yPercent"],
+      "properties": {
+        "markupId": { "type": "string" },
+        "kind": { "type": "string", "enum": ["text", "circle_hole", "square_hole", "lock"] },
+        "text": { "type": "string" },
+        "sizeMm": { "type": "number", "minimum": 0, "maximum": 300 },
+        "hostType": { "type": "string", "const": "cell" },
+        "hostWindowId": { "type": "string" },
+        "hostCellId": { "type": "string" },
+        "xPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "yPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "offsetXPercent": { "type": "number", "minimum": -100, "maximum": 100 },
+        "offsetYPercent": { "type": "number", "minimum": -100, "maximum": 100 },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
     },
     "openingAssembly": {
       "type": "object",

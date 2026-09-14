@@ -3,6 +3,7 @@ const JOINT_EDGES = new Set(["left", "right", "top", "bottom"]);
 const ORIENTATIONS = new Set(["normal", "reversed"]);
 const FRAME_TREATMENTS = new Set(["keep_both", "shared_frame", "connector_only"]);
 const POST_MODES = new Set(["profile", "postless"]);
+const ALIAS_DISPLAYS = new Set(["code", "alias", "all", "hidden"]);
 
 export const JOINT_STYLE_OPTIONS = {
   splice: [
@@ -13,7 +14,8 @@ export const JOINT_STYLE_OPTIONS = {
     { value: "default", label: "默认转角" },
     { value: "curved", label: "弧形面转角" },
     { value: "universal", label: "万能转角" },
-    { value: "rectangular", label: "矩形转角" }
+    { value: "rectangular", label: "矩形转角" },
+    { value: "giant", label: "巨型转角" }
   ]
 };
 
@@ -34,6 +36,7 @@ export function defaultJointProfile(type, series) {
 
 export function createEngineeringJoint(type, win, series) {
   const normalizedType = JOINT_TYPES.has(type) ? type : "splice";
+  const defaultLegWidth = normalizedType === "corner" ? 100 : 50;
   return normalizeEngineeringJoint({
     jointId: jointId(),
     type: normalizedType,
@@ -43,8 +46,8 @@ export function createEngineeringJoint(type, win, series) {
     hostEdge: "right",
     connectedWindowIds: [win.windowId],
     angleDeg: normalizedType === "corner" ? 90 : 180,
-    legWidthAMm: 50,
-    legWidthBMm: 50,
+    legWidthAMm: defaultLegWidth,
+    legWidthBMm: defaultLegWidth,
     span: { startRatio: 0, endRatio: 1 },
     profileId: defaultJointProfile(normalizedType, series),
     frameTreatment: "keep_both",
@@ -57,6 +60,7 @@ export function createEngineeringJoint(type, win, series) {
 export function normalizeEngineeringJoint(joint, validWindowIds) {
   if (!joint || !validWindowIds.has(joint.hostWindowId)) return null;
   const type = JOINT_TYPES.has(joint.type) ? joint.type : "splice";
+  const defaultLegWidth = type === "corner" ? 100 : 50;
   const styleOptions = JOINT_STYLE_OPTIONS[type];
   const style = styleOptions.some(item => item.value === joint.style) ? joint.style : styleOptions[0].value;
   const startRatio = clamp(joint.span?.startRatio ?? 0, 0, 0.95, 0);
@@ -74,13 +78,14 @@ export function normalizeEngineeringJoint(joint, validWindowIds) {
     hostEdge: JOINT_EDGES.has(joint.hostEdge) ? joint.hostEdge : "right",
     connectedWindowIds,
     angleDeg: type === "corner" ? clamp(joint.angleDeg, 60, 180, 90) : 180,
-    legWidthAMm: clamp(joint.legWidthAMm, 10, 300, 50),
-    legWidthBMm: clamp(joint.legWidthBMm, 10, 300, 50),
+    legWidthAMm: clamp(joint.legWidthAMm, 10, 300, defaultLegWidth),
+    legWidthBMm: clamp(joint.legWidthBMm, 10, 300, defaultLegWidth),
     span: { startRatio, endRatio },
     profileId: String(joint.profileId || ""),
     frameTreatment: FRAME_TREATMENTS.has(joint.frameTreatment) ? joint.frameTreatment : "keep_both",
     postMode: type === "corner" && POST_MODES.has(joint.postMode) ? joint.postMode : "profile",
     fastenerSpacingMm: clamp(joint.fastenerSpacingMm, 100, 1000, 400),
+    aliasDisplay: ALIAS_DISPLAYS.has(joint.aliasDisplay) ? joint.aliasDisplay : "alias",
     note: String(joint.note || "")
   };
 }
@@ -107,7 +112,7 @@ export function jointLengthMm(joint, win) {
 }
 
 export function jointLabel(joint, index = 0) {
-  return `${joint?.type === "corner" ? "C" : "S"}${index + 1}`;
+  return `${joint?.type === "corner" ? "T" : "S"}${index + 1}`;
 }
 
 export function jointStatus(joint) {

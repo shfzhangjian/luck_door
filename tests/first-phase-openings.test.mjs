@@ -326,6 +326,34 @@ const turnPlan = openingPlanProjection(sharedTurnPart, 1);
 assert.equal(turnPlan.corners.length, 4, "a projected sash should expose a four-corner plan footprint");
 assert.ok(Math.max(...turnPlan.corners.map(point => point.z)) > 0.9, "an outward casement should visibly project beyond the wall in plan");
 
+const sideHingeRoot = new THREE.Group();
+sideHingeRoot.position.set(-0.6, 0, 0.065);
+applyOpeningTransform({
+  type: "turn",
+  cell: { opening: "left_in" },
+  object: sideHingeRoot,
+  width: 1.2,
+  height: 1.5,
+  closedPosition: sideHingeRoot.position.clone(),
+  hingeAxis: "side"
+}, 1);
+assert.ok(Math.abs(sideHingeRoot.position.x + 0.6) < 0.000001, "a 3D side-hinged mechanism root must stay fixed on the frame axis");
+assert.ok(Math.abs(sideHingeRoot.rotation.y) > 0.2, "a 3D side-hinged sash must rotate around that fixed mechanism axis");
+
+const horizontalHingeRoot = new THREE.Group();
+horizontalHingeRoot.position.set(0, 0.75, 0.065);
+applyOpeningTransform({
+  type: "top_hung",
+  cell: { opening: "top_out" },
+  object: horizontalHingeRoot,
+  width: 1.2,
+  height: 1.5,
+  closedPosition: horizontalHingeRoot.position.clone(),
+  hingeAxis: "horizontal"
+}, 1);
+assert.ok(Math.abs(horizontalHingeRoot.position.y - 0.75) < 0.000001, "a 3D horizontal-hinged mechanism root must stay fixed on the frame axis");
+assert.ok(Math.abs(horizontalHingeRoot.rotation.x) > 0.2, "a 3D horizontal-hinged sash must rotate around that fixed mechanism axis");
+
 const projectPlan = openingPlanProjection({
   type: "parallel_project",
   width: 1.4,
@@ -369,7 +397,8 @@ assert.ok(!app.includes("const cornerBodyDepth = Math.max(wallDepth"), "a full-h
 assert.ok(app.includes("function addThreeOrientationLabels("), "the 3D installation scene should label its indoor and outdoor spaces");
 assert.ok(app.includes('createThreeGroundSideLabel("室外"'), "the 3D installation scene should expose a stable outdoor ground marker");
 assert.ok(app.includes('createThreeGroundSideLabel("室内"'), "the 3D installation scene should expose a stable indoor ground marker");
-assert.ok(app.includes("const planClearance = Math.max(118, cornerRise + 70, planExtents.outside + 54)"), "the plan view should reserve clearance for projected sashes and corner walls");
+assert.ok(app.includes("const planClearance = Math.max(92, cornerRise + 50, planExtents.outside + 38)"), "the plan view should keep the section view closer to the elevation");
+assert.ok(app.includes("planExtents.inside + 130"), "the plan view should reserve bottom clearance so 室内 labels are not covered by the view options bar");
 assert.ok(app.includes("renderPlanView(win, rects, x, planY"), "the plan view should use its dynamically resolved baseline");
 assert.ok(app.includes("Math.max(110, extents.inside + 54)"), "the overall plan dimension should remain below inward-opening sash projections");
 assert.ok(app.includes("function buildPlanOpeningParts("), "the plan view should build one shared-kinematics descriptor per movable sash");

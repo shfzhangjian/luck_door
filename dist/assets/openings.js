@@ -501,6 +501,7 @@ export function openingTransformState(part, ratio) {
     const angleSign = (topHinged ? -1 : 1) * (outward ? 1 : -1);
     const angle = angleSign * (topHinged ? 0.72 : 0.42) * value;
     rotation.x = angle;
+    if (part.hingeAxis === "horizontal") return state;
     position.y += pivotY - Math.cos(angle) * pivotY;
     position.z -= Math.sin(angle) * pivotY;
     return state;
@@ -521,6 +522,7 @@ export function openingTransformState(part, ratio) {
   const maxAngle = motionType === "door" ? 1.38 : 1.16;
   const angle = (leftHinged ? 1 : -1) * (outward ? -1 : 1) * maxAngle * value;
   rotation.y = angle;
+  if (part.hingeAxis === "side") return state;
   position.x += pivotX - Math.cos(angle) * pivotX;
   position.z += Math.sin(angle) * pivotX;
   return state;

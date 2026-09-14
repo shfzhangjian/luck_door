@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>朗科门窗设计大师</title>
-  <meta name="description" content="朗科门窗可视化设计、算料和BOM输出工作台" />
+  <title>朗科云设计</title>
+  <meta name="description" content="朗科云设计门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260912-51" />
+  <link rel="stylesheet" href="assets/app.css?v=20260914-10" />
   <script type="importmap">
     {
       "imports": {
@@ -22,7 +22,7 @@
       <div class="brand">
         <div class="mark">朗</div>
         <div>
-          <h1>朗科门窗设计大师</h1>
+          <h1>朗科云设计</h1>
           <span>中国门窗设计 · 3D预览 · 算料 · BOM</span>
         </div>
       </div>
@@ -32,8 +32,19 @@
         <button class="module-button" data-module="bom">算料/BOM</button>
       </nav>
       <div class="top-actions">
-        <span class="status-pill"><span class="dot ok"></span>已自动保存</span>
-        <button id="btnExportJsonTop">导出设计</button>
+        <div class="project-command-bar" aria-label="项目命令">
+          <button id="btnNewProjectTop"><span>✚</span>新建项目</button>
+          <button id="btnOpenProjectTop"><span>▣</span>打开项目</button>
+          <button id="btnNewWindowTop" class="hidden" aria-hidden="true" tabindex="-1"><span>▤</span>新增窗型</button>
+          <button id="btnSaveProjectTop"><span>▣</span>保存项目</button>
+          <button id="btnSaveComponentTop"><span>▥</span>保存到窗型库</button>
+          <button id="btnMeasurementTop"><span>⌖</span>手机量房图</button>
+          <button id="btnPrintDesignTop"><span>▧</span>打印门窗</button>
+        </div>
+        <div class="system-command-bar" aria-label="系统状态">
+          <span class="status-pill"><span class="dot ok"></span>已自动保存</span>
+          <button id="btnExportJsonTop">导出设计</button>
+        </div>
       </div>
     </header>
 
@@ -51,7 +62,7 @@
           <div class="tool-library-head">
             <div>
               <h2>绘图工具</h2>
-              <span>先选窗格，再应用构件或绘图命令</span>
+              <span>先选工具，再到画布已有窗框或区域上点击放置</span>
             </div>
             <input id="toolSearch" type="search" placeholder="搜索框、梃、开启方式" aria-label="搜索绘图工具" />
           </div>
@@ -66,8 +77,8 @@
               </div>
             </section>
 
-            <section class="tool-section" data-tool-group="画框 四边框 上拱框 斜顶框 双斜顶 缺角框 异形">
-              <div class="tool-section-head"><h3>框</h3><span>整窗外形</span></div>
+            <section class="tool-section" data-tool-group="门 窗框 四边框 门框带屏 上弧框 自由画窗">
+              <div class="tool-section-head"><h3>门/窗框</h3><span>展开更多</span></div>
               <div class="palette-grid compact">
                 <button class="palette-tile" data-shape-preset="rectangular"><span>□</span><strong>四边框</strong></button>
                 <button class="palette-tile" data-shape-preset="arched"><span>⌒</span><strong>上拱框</strong></button>
@@ -81,8 +92,8 @@
               <div id="customShapeLibrary" class="custom-shape-library" aria-label="已保存DIY窗型"></div>
             </section>
 
-            <section class="tool-section" data-tool-group="中梃 竖梃 横梃 局部梃 等分 分格">
-              <div class="tool-section-head"><h3>梃与分格</h3><span>结构命令</span></div>
+            <section class="tool-section" data-tool-group="中梃 转角料 连接件 竖中梃 横中梃 自由画框">
+              <div class="tool-section-head"><h3>中梃/转角料/连接件</h3><span>展开更多</span></div>
               <div class="palette-grid compact">
                 <button id="btnAddCol" class="palette-tile"><span>┃</span><strong>贯通竖梃</strong></button>
                 <button id="btnAddRow" class="palette-tile"><span>━</span><strong>贯通横梃</strong></button>
@@ -124,9 +135,11 @@
             </section>
 
             <section class="tool-section" data-tool-group="开启扇 平开 内开内倒 上悬 下悬 门扇 双扇">
-              <div class="tool-section-head"><h3>开启扇</h3><span>平开与悬窗</span></div>
+              <div class="tool-section-head"><h3>开启扇</h3><span>展开更多</span></div>
               <div class="palette-grid compact">
-                <button class="palette-tile" data-cell-preset="turn"><span>↗</span><strong>平开扇</strong></button>
+                <button class="palette-tile" data-cell-preset="turn" data-cell-opening="left_out"><span>↗</span><strong>左外开扇</strong></button>
+                <button class="palette-tile" data-cell-preset="turn" data-cell-opening="right_out"><span>↖</span><strong>右外开扇</strong></button>
+                <button class="palette-tile" data-cell-preset="turn" data-cell-opening="left_out" data-cell-panels="2"><span>◇◇</span><strong>外开对开扇</strong></button>
                 <button class="palette-tile" data-cell-preset="turn_tilt"><span>⌁</span><strong>内开内倒</strong></button>
                 <button class="palette-tile" data-cell-preset="top_hung"><span>↑</span><strong>上悬窗</strong></button>
                 <button class="palette-tile" data-cell-preset="bottom_hung"><span>↓</span><strong>下悬窗</strong></button>
@@ -135,10 +148,12 @@
               </div>
             </section>
 
-            <section class="tool-section" data-tool-group="推拉 折叠 提升 PSK 平行 入墙 转角 上下提拉">
-              <div class="tool-section-head"><h3>推拉与折叠</h3><span>多扇开启</span></div>
+            <section class="tool-section" data-tool-group="推拉扇 两扇 三扇 四扇 四等分 折叠 提升 PSK 平行 入墙 转角 上下提拉">
+              <div class="tool-section-head"><h3>推拉扇</h3><span>展开更多</span></div>
               <div class="palette-grid compact">
-                <button class="palette-tile" data-cell-preset="sliding"><span>⇄</span><strong>普通推拉</strong></button>
+                <button class="palette-tile" data-cell-preset="sliding" data-cell-panels="2" data-cell-tracks="2"><span>⇄</span><strong>两扇等分</strong></button>
+                <button class="palette-tile" data-cell-preset="sliding" data-cell-panels="3" data-cell-tracks="3"><span>⇆</span><strong>三扇三等分</strong></button>
+                <button class="palette-tile" data-cell-preset="sliding" data-cell-panels="4" data-cell-tracks="2"><span>⇔</span><strong>四扇四等分</strong></button>
                 <button class="palette-tile" data-cell-preset="lift_slide"><span>⇧</span><strong>提升推拉</strong></button>
                 <button class="palette-tile" data-cell-preset="psk"><span>⇲</span><strong>PSK平移内倒</strong></button>
                 <button class="palette-tile" data-cell-preset="parallel_slide"><span>⇥</span><strong>平行推拉</strong></button>
@@ -150,13 +165,15 @@
               </div>
             </section>
 
-            <section class="tool-section" data-tool-group="格条 纱窗 百叶 面板 留空 辅件">
-              <div class="tool-section-head"><h3>格条与辅件</h3><span>填充构件</span></div>
+            <section class="tool-section" data-tool-group="格条 纱窗 一键加纱 防盗条 一键添加防盗条 百叶 面板 板材 单扇 双扇 留空 辅件">
+              <div class="tool-section-head"><h3>其他</h3><span>展开更多</span></div>
               <div class="palette-grid compact">
                 <button class="palette-tile" data-cell-preset="grille"><span>╬</span><strong>格条</strong></button>
-                <button class="palette-tile" data-cell-preset="screen"><span>╳</span><strong>纱窗</strong></button>
+                <button id="btnOneClickScreen" class="palette-tile"><span>╳</span><strong>一键加纱</strong></button>
+                <button id="btnOneClickSecurityBars" class="palette-tile"><span>|||</span><strong>一键添加防盗条</strong></button>
                 <button class="palette-tile" data-cell-preset="louver"><span>≋</span><strong>百叶</strong></button>
-                <button class="palette-tile" data-cell-preset="panel"><span>▣</span><strong>面板</strong></button>
+                <button class="palette-tile" data-cell-preset="panel" data-panel-mode="single"><span>▣</span><strong>板材单扇</strong></button>
+                <button class="palette-tile" data-cell-preset="panel" data-panel-mode="double"><span>▣▣</span><strong>板材双扇</strong></button>
                 <button class="palette-tile" data-cell-preset="empty"><span>—</span><strong>留空</strong></button>
               </div>
             </section>
@@ -171,9 +188,18 @@
               <label>项目编号<input id="projectId" /></label>
               <label>项目名称<input id="projectName" /></label>
               <label>客户<input id="customerName" /></label>
+              <label>联系电话<input id="projectPhone" /></label>
               <label>地址<input id="projectAddress" /></label>
               <label>销售单号<input id="orderId" /></label>
               <label>生产批次<input id="batchNo" /></label>
+              <label>项目进度
+                <select id="projectStatus">
+                  <option value="new">新建</option>
+                  <option value="designing">设计中</option>
+                  <option value="review">待确认</option>
+                  <option value="confirmed">已确认</option>
+                </select>
+              </label>
             </div>
           </section>
 
@@ -225,7 +251,17 @@
 
         <div id="left-components" class="left-pane hidden">
           <section class="section">
-            <h2>门窗组件</h2>
+            <h2>窗型库</h2>
+            <div class="library-switch" role="tablist" aria-label="窗型库来源">
+              <button class="library-tab active" data-template-source="smart">智能窗型库</button>
+              <button class="library-tab" data-template-source="custom">我的窗型库</button>
+            </div>
+            <input id="templateSearch" type="search" placeholder="搜索窗型名称、尺寸、开启方式" aria-label="搜索窗型库" />
+            <div id="smartLibraryPanel" class="smart-library-panel">
+              <p>按门洞尺寸生成云端候选窗型，分三步选择并立即使用。</p>
+              <button id="btnOpenSmartLibrary" class="primary" type="button">打开智能窗型库</button>
+            </div>
+            <div id="customLibraryHint" class="library-hint hidden">我的窗型库保存当前窗体，不会替换项目；点击窗型后应用到当前选中窗体继续编辑。</div>
             <div class="row">
               <button id="btnSaveComponent" class="primary">保存当前窗型</button>
               <button id="btnClearCustom" class="danger">清空自定义</button>
@@ -233,6 +269,7 @@
           </section>
           <section class="section">
             <div id="templateList" class="template-list"></div>
+            <div id="templateEmpty" class="library-empty hidden">当前窗型库暂无匹配内容</div>
           </section>
         </div>
 
@@ -258,9 +295,16 @@
       <section class="design">
         <div class="design-toolbar">
           <div class="toolbar-group" aria-label="门窗文件">
-            <button id="btnNewWindow" class="primary">新建门窗</button>
-            <button id="btnDuplicateWindow">复制</button>
-            <button id="btnDeleteWindow" class="danger">删除</button>
+            <button id="btnNewWindow" class="primary hidden" aria-hidden="true" tabindex="-1">新建门窗</button>
+            <button id="btnDuplicateWindow" class="toolbar-action"><span class="button-icon" aria-hidden="true">⧉</span><span>复制</span></button>
+            <button id="btnDeleteWindow" class="toolbar-action danger"><span class="button-icon" aria-hidden="true">×</span><span>删除</span></button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <div class="toolbar-group" aria-label="标注与玻璃孔">
+            <button id="btnTextAnnotation" class="toolbar-action" data-markup-tool="text"><span class="button-icon" aria-hidden="true">A</span><span>文字标注</span></button>
+            <button id="btnCircleHole" class="toolbar-action" data-markup-tool="circle_hole"><span class="button-icon" aria-hidden="true">○</span><span>圆孔</span></button>
+            <button id="btnSquareHole" class="toolbar-action" data-markup-tool="square_hole"><span class="button-icon" aria-hidden="true">□</span><span>方孔</span></button>
+            <button id="btnLockHardware" class="toolbar-action" data-markup-tool="lock"><span class="button-icon" aria-hidden="true">⌑</span><span>锁具</span></button>
           </div>
           <span class="toolbar-separator" aria-hidden="true"></span>
           <span id="selectionModeLabel" class="toolbar-context">选择模式 · 窗格</span>
@@ -274,7 +318,10 @@
               <span id="drawingStats"></span>
             </div>
             <div class="canvas-shell">
+              <button id="canvasPanHandle" class="canvas-pan-handle" type="button" aria-label="拖动画布位置"><span aria-hidden="true">✥</span></button>
               <svg id="windowSvg" class="window-canvas" viewBox="0 0 900 760" role="img" aria-label="门窗绘制画布"></svg>
+              <input id="canvasDimensionInput" class="canvas-dimension-input hidden" type="number" />
+              <input id="canvasMarkupInput" class="canvas-markup-input hidden" type="text" aria-label="编辑标注或玻璃孔参数" />
               <div class="drawing-view-options" role="group" aria-label="图纸显示选项">
                 <label><input id="viewShowOpenState" type="checkbox" />开启状态</label>
                 <label><input id="viewShowProfileColor" type="checkbox" />型材颜色</label>
@@ -287,12 +334,24 @@
           </div>
         </div>
 
-        <div class="window-strip">
-          <div id="windowCards" class="window-cards"></div>
-        </div>
       </section>
 
       <aside class="panel right inspector-panel">
+        <div class="object-tree-shell">
+          <section class="object-tree-section">
+            <div class="object-tree-heading">
+              <h2>对象树（调试）</h2>
+              <button id="btnTreeExpandAll" type="button" title="展开全部节点" aria-label="展开全部节点">＋</button>
+              <button id="btnTreeCollapseAll" type="button" title="收起全部节点" aria-label="收起全部节点">－</button>
+              <button id="btnToggleObjectPanel" type="button" title="收起对象面板" aria-label="收起对象面板" aria-expanded="true">›</button>
+            </div>
+            <div id="objectTree" class="object-tree" aria-label="当前项目对象树"></div>
+          </section>
+          <section class="selected-object-panel">
+            <h2>当前选择属性</h2>
+            <div id="selectedObjectProperties" class="selected-object-properties" aria-label="当前选择对象属性"></div>
+          </section>
+        </div>
         <div class="tabs" role="tablist" aria-label="属性">
           <button class="inspector-tab active" data-inspector="window">整窗属性</button>
           <button class="inspector-tab" data-inspector="cell">选中构件</button>
@@ -339,6 +398,28 @@
           <section class="section inspector-summary">
             <h2>窗型能力</h2>
             <ul id="designerCapabilitySummary" class="mini-list"></ul>
+          </section>
+          <section class="section window-save-section">
+            <h2>保存门窗信息</h2>
+            <div class="form-grid one">
+              <label><span class="required-star">*</span>安装位置<input id="saveInstallLocation" placeholder="请选择或输入" /></label>
+              <label><span class="required-star">*</span>系列<select id="saveSeriesId"></select></label>
+              <label><span class="required-star">*</span>玻璃<select id="saveGlassTypeId"></select></label>
+              <label>颜色<input id="saveColor" placeholder="请选择" /></label>
+              <label>开启方式<input id="saveOpeningMode" placeholder="自动汇总或手动输入" /></label>
+              <label>套数x单价
+                <div class="price-row">
+                  <input id="saveUnitPriceQty" type="number" min="1" step="1" readonly />
+                  <span>x</span>
+                  <input id="saveUnitPrice" type="number" min="0" step="1" />
+                </div>
+              </label>
+              <label>总价<input id="saveTotalPrice" type="number" min="0" step="1" readonly /></label>
+              <label>产品备注<textarea id="saveWindowNote" rows="3" maxlength="150" placeholder="请输入备注（限150字以内）"></textarea></label>
+            </div>
+            <p id="windowSaveError" class="form-error-message hidden">窗号、安装位置、系列、玻璃为必填项。</p>
+            <button id="btnSaveWindowInfo" class="primary full-width-action" type="button">保存门窗信息</button>
+            <button id="btnSaveWindowAndNew" class="primary full-width-action" type="button">保存门窗并新增</button>
           </section>
         </div>
 
@@ -485,6 +566,12 @@
                   <option value="glass">玻璃</option>
                   <option value="panel">面板</option>
                   <option value="louver">百叶</option>
+                </select>
+              </label>
+              <label id="cellPanelModeField">板材样式
+                <select id="cellPanelMode">
+                  <option value="single">单扇</option>
+                  <option value="double">双扇</option>
                 </select>
               </label>
               <label>配套纱窗
@@ -805,7 +892,7 @@
           </div>
           <div class="preview-actions">
             <span id="previewViewSide" class="preview-view-side">主立面：室外侧观察</span>
-            <span class="preview-help">左键选择，右键菜单，Ctrl / Shift 多选，拖动旋转视角</span>
+            <span class="preview-help">点击构件选择，右键菜单，拖动旋转视角</span>
             <button id="btnResetView" class="ghost">复位视角</button>
             <button id="btnClosePreview">关闭</button>
           </div>
@@ -832,11 +919,15 @@
                 <strong>构件选择</strong>
                 <span id="previewSelectionCount">已选 0</span>
               </div>
-              <div class="selection-mode" aria-label="选择方式">
-                <button class="preview-select-mode active" data-preview-select-mode="single" aria-pressed="true">单选</button>
-                <button class="preview-select-mode" data-preview-select-mode="multiple" aria-pressed="false">多选</button>
-              </div>
               <div id="previewPartList" class="preview-part-list" role="listbox" aria-label="可开启构件" aria-multiselectable="true"></div>
+            </section>
+            <section class="preview-control-section">
+              <div class="preview-section-title"><strong>图面显示</strong></div>
+              <div class="preview-visibility">
+                <label><input id="previewShowDimensions" type="checkbox" checked />尺寸</label>
+                <label><input id="previewShowMarkups" type="checkbox" checked />标注/孔位/锁具</label>
+                <label><input id="previewShowOrientation" type="checkbox" checked />室内/室外</label>
+              </div>
             </section>
             <label>开启方式
               <select id="previewMotionMode" aria-label="开启方式">
@@ -935,11 +1026,290 @@
         <strong>温馨提示：</strong>
         <span>修改宽度：双击标尺修改转角料宽度；双击角度值可修改角度</span>
       </div>
-      <svg id="jointSettingsPreview" viewBox="0 0 520 420" role="img" aria-label="转角设置预览"></svg>
+      <div id="jointSettingsPreviewWrap" class="joint-settings-preview-wrap">
+        <svg id="jointSettingsPreview" viewBox="0 0 520 420" role="img" aria-label="转角设置预览"></svg>
+        <input id="jointSettingsInlineInput" class="joint-settings-inline-input hidden" type="number" />
+      </div>
+    </div>
+  </dialog>
+  <dialog id="surroundDesignDialog" class="surround-design-dialog" aria-labelledby="surroundDesignTitle">
+    <div class="surround-design-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="surroundDesignTitle">设置包套</h2>
+          <span id="surroundDesignSubtitle">三步完成洞口包套设计</span>
+        </div>
+        <button id="btnCloseSurroundDesign" type="button">关闭</button>
+      </header>
+      <div class="surround-design-body">
+        <aside class="surround-design-steps">
+          <section class="surround-step">
+            <strong>第一步：选择包套样式</strong>
+            <select id="surroundDialogStyle">
+              <option value="both_sides">内外双包套</option>
+              <option value="outside_only">仅外包套</option>
+              <option value="inside_only">仅内包套</option>
+              <option value="liner">洞口衬板</option>
+            </select>
+          </section>
+          <section class="surround-step">
+            <strong>第二步：选择包套类型</strong>
+            <select id="surroundDialogEdgeMode">
+              <option value="all">全边框</option>
+              <option value="three_without_bottom">三边无底框</option>
+              <option value="left_top">左上包框</option>
+              <option value="right_top">右上包框</option>
+              <option value="custom">自定义边</option>
+            </select>
+            <div id="surroundDialogCustomSides" class="surround-side-grid hidden" aria-label="包套自定义应用边">
+              <label><input id="surroundDialogSideTop" type="checkbox" />上边</label>
+              <label><input id="surroundDialogSideRight" type="checkbox" />右边</label>
+              <label><input id="surroundDialogSideBottom" type="checkbox" />下边</label>
+              <label><input id="surroundDialogSideLeft" type="checkbox" />左边</label>
+            </div>
+          </section>
+          <section class="surround-step">
+            <strong>第三步：确认尺寸</strong>
+            <div class="form-grid one">
+              <label>墙厚 mm<input id="surroundDialogWallThickness" type="number" min="60" max="600" step="1" /></label>
+              <label>外包边宽 mm<input id="surroundDialogOutsideWidth" type="number" min="0" max="500" step="1" /></label>
+              <label>内包边宽 mm<input id="surroundDialogInsideWidth" type="number" min="0" max="500" step="1" /></label>
+              <label>板材厚度 mm<input id="surroundDialogBoardThickness" type="number" min="5" max="100" step="1" /></label>
+            </div>
+          </section>
+          <div class="surround-design-actions">
+            <button id="btnConfirmSurroundDesign" class="primary" type="button">确认设计</button>
+            <button id="btnCancelSurroundDesign" type="button">取消</button>
+          </div>
+        </aside>
+        <section class="surround-design-preview-panel">
+          <div class="surround-design-tip">双击蓝色尺寸可编辑；滚轮缩放，长按滚轮拖拽平移。</div>
+          <div id="surroundDialogPreviewWrap" class="surround-dialog-preview-wrap">
+            <svg id="surroundDialogPreview" viewBox="0 0 620 430" role="img" aria-label="包套设计预览"></svg>
+            <input id="surroundDialogInlineInput" class="surround-dialog-inline-input hidden" type="number" />
+          </div>
+          <ul id="surroundDialogSummary" class="mini-list"></ul>
+        </section>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="projectManagerDialog" class="project-manager-dialog" aria-labelledby="projectManagerTitle">
+    <div class="project-manager-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="projectManagerTitle">项目管理</h2>
+          <span id="projectManagerStats">本机项目库</span>
+        </div>
+        <button id="btnCloseProjectManager" type="button">关闭</button>
+      </header>
+      <div class="project-manager-body">
+        <div class="project-current-card">
+          <strong id="projectManagerCurrentName">当前项目</strong>
+          <span id="projectManagerCurrentMeta">-</span>
+          <div class="row">
+            <button id="btnManagerSaveProject" class="primary" type="button">保存当前项目</button>
+            <button id="btnManagerNewProject" type="button">新建项目</button>
+            <button id="btnManagerEditProject" type="button">编辑项目</button>
+            <button id="btnManagerMeasurement" type="button">手机量房图</button>
+          </div>
+        </div>
+        <div id="projectProgressChain" class="project-progress-chain" role="group" aria-label="项目进度"></div>
+        <div class="project-manager-grid">
+          <section class="project-list-panel" aria-label="项目列表">
+            <div id="projectLibraryList" class="project-library-list"></div>
+            <div id="projectLibraryEmpty" class="library-empty hidden">还没有保存项目，先点击“保存当前项目”。</div>
+          </section>
+          <aside class="project-preview-panel" aria-label="项目预览">
+            <div class="project-preview-head">
+              <div>
+                <strong id="projectPreviewName">请选择项目</strong>
+                <span id="projectPreviewMeta">单击左侧项目卡片预览，右下角“打开项目”才进入设计。</span>
+              </div>
+              <button id="btnProjectPreviewEdit" type="button" aria-label="编辑预览项目">编辑</button>
+            </div>
+            <div id="projectPreviewWindows" class="project-preview-windows"></div>
+            <div class="row">
+              <button id="btnProjectPreviewOpen" class="primary" type="button">打开项目</button>
+              <button id="btnProjectPreviewMeasurement" type="button">手机量房图</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="projectCreateDialog" class="project-create-dialog" aria-labelledby="projectCreateTitle">
+    <div class="project-create-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="projectCreateTitle">新建项目</h2>
+          <span>项目名称和客户电话为必填项，保存后进入门窗方案设计</span>
+        </div>
+        <button id="btnCloseProjectCreate" type="button">关闭</button>
+      </header>
+      <div class="project-create-body">
+        <div class="form-grid">
+          <label><span class="required-star">*</span>项目名称<input id="createProjectName" placeholder="请输入项目名称，如 李小姐" /></label>
+          <label><span class="required-star">*</span>客户电话<input id="createProjectPhone" placeholder="请输入客户电话" /></label>
+          <label>客户地址<input id="createProjectAddress" placeholder="请输入客户地址" /></label>
+          <label>项目单位名称<input id="createProjectCompanyName" placeholder="请输入单位名称" /></label>
+          <label>添加员<input id="createProjectClerk" placeholder="请输入或选择添加员" /></label>
+          <label>需求时间<input id="createProjectDemandDate" type="date" /></label>
+        </div>
+        <label class="wide-field">项目备注<textarea id="createProjectNote" rows="3" placeholder="请输入注意事项"></textarea></label>
+        <p id="projectCreateError" class="form-error-message hidden">请填写项目名称和客户电话。</p>
+        <div class="row">
+          <button id="btnCancelProjectCreate" type="button">取消</button>
+          <button id="btnSaveProjectCreate" class="primary" type="button">保存</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="componentSaveDialog" class="component-save-dialog" aria-labelledby="componentSaveTitle">
+    <div class="component-save-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="componentSaveTitle">保存到窗型库</h2>
+          <span>选择窗户类型后保存到“我的窗型库”，后续可立即使用</span>
+        </div>
+        <button id="btnCloseComponentSave" type="button">关闭</button>
+      </header>
+      <div class="component-save-body">
+        <div class="form-grid">
+          <label>窗型名称<input id="saveComponentName" placeholder="请输入窗型名称" /></label>
+          <label>窗型类型
+            <select id="saveComponentType">
+              <option value="fixed">固定窗</option>
+              <option value="casement">平开窗</option>
+              <option value="sliding">推拉窗</option>
+              <option value="combination">组合窗</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+        </div>
+        <p id="componentSaveError" class="form-error-message hidden">请填写窗型名称。</p>
+        <div class="row">
+          <button id="btnCancelComponentSave" type="button">取消</button>
+          <button id="btnConfirmComponentSave" class="primary" type="button">保存</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="windowSaveConfirmDialog" class="component-save-dialog" aria-labelledby="windowSaveConfirmTitle">
+    <div class="component-save-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="windowSaveConfirmTitle">添加到项目</h2>
+          <span>确认后当前门窗信息会保存到项目，并可在右侧对象树中查看</span>
+        </div>
+        <button id="btnCloseWindowSaveConfirm" type="button">关闭</button>
+      </header>
+      <div class="component-save-body">
+        <div id="windowSaveConfirmSummary" class="confirm-summary"></div>
+        <div class="row">
+          <button id="btnCancelWindowSaveConfirm" type="button">取消</button>
+          <button id="btnConfirmSaveWindowInfo" class="primary" type="button">确认添加</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="smartLibraryDialog" class="smart-library-dialog" aria-labelledby="smartLibraryTitle">
+    <div class="smart-library-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="smartLibraryTitle">智能窗型库</h2>
+          <span>按门洞尺寸生成候选窗型，选择类型后立即使用</span>
+        </div>
+        <button id="btnCloseSmartLibrary" type="button">关闭</button>
+      </header>
+      <div class="smart-library-body">
+        <section class="smart-step">
+          <strong>第一步：输入门洞尺寸，智能推荐门窗款式</strong>
+          <div class="smart-size-row">
+            <label>门洞宽 <input id="smartOpeningWidth" type="number" min="300" step="10" /> mm</label>
+            <label>门洞高 <input id="smartOpeningHeight" type="number" min="300" step="10" /> mm</label>
+            <button id="btnGenerateSmartTemplates" class="primary" type="button">确定门洞尺寸</button>
+          </div>
+        </section>
+        <section class="smart-step">
+          <strong>第二步：选择门窗类型</strong>
+          <div id="smartTypeTabs" class="smart-type-tabs" role="tablist" aria-label="智能窗型类型">
+            <button class="active" data-smart-filter="all" type="button">全部</button>
+            <button data-smart-filter="fixed" type="button">固定</button>
+            <button data-smart-filter="casement" type="button">平开</button>
+            <button data-smart-filter="sliding" type="button">推拉</button>
+          </div>
+        </section>
+        <section class="smart-step smart-style-step">
+          <strong>第三步：请选择你需要的门窗款式（点击“立即使用”即可）</strong>
+          <div id="smartCandidateList" class="smart-candidate-list"></div>
+          <div id="smartCandidateEmpty" class="library-empty hidden">当前类型暂无智能窗型，请切换类型或调整门洞尺寸。</div>
+          <div id="smartPager" class="smart-pager" aria-label="智能窗型分页"></div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="projectEditDialog" class="project-edit-dialog" aria-labelledby="projectEditTitle">
+    <div class="project-edit-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="projectEditTitle">编辑项目</h2>
+          <span>项目资料会随保存项目一起进入本机项目库</span>
+        </div>
+        <button id="btnCloseProjectEdit" type="button">关闭</button>
+      </header>
+      <div class="project-edit-body">
+        <div class="form-grid">
+          <label>项目编号<input id="editProjectId" /></label>
+          <label>项目名称<input id="editProjectName" /></label>
+          <label>客户<input id="editCustomerName" /></label>
+          <label>联系电话<input id="editProjectPhone" /></label>
+          <label>地址<input id="editProjectAddress" /></label>
+          <label>销售单号<input id="editOrderId" /></label>
+          <label>生产批次<input id="editBatchNo" /></label>
+          <label>项目进度
+            <select id="editProjectStatus">
+              <option value="new">新建</option>
+              <option value="designing">设计中</option>
+              <option value="review">待确认</option>
+              <option value="confirmed">已确认</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <button id="btnSaveProjectEdit" class="primary" type="button">保存编辑</button>
+          <button id="btnCancelProjectEdit" type="button">取消</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="measurementDialog" class="measurement-dialog" aria-labelledby="measurementTitle">
+    <div class="measurement-shell">
+      <header class="project-manager-head">
+        <div>
+          <h2 id="measurementTitle">手机量房图</h2>
+          <span>按项目洞口记录生成窗型设计入口</span>
+        </div>
+        <button id="btnCloseMeasurement" type="button">关闭</button>
+      </header>
+      <div class="measurement-body">
+        <div id="measurementList" class="measurement-list"></div>
+      </div>
     </div>
   </dialog>
   <div id="cellContextMenu" class="object-menu cell-object-menu hidden" role="menu" aria-label="窗格快捷操作">
     <div id="cellMenuTitle" class="object-menu-title">窗格操作</div>
+    <button data-cell-menu-action="corner" role="menuitem">是否带转角料</button>
+    <button data-cell-menu-action="louver" role="menuitem">玻璃带百叶</button>
+    <button data-cell-menu-action="screen" role="menuitem">玻璃带纱窗</button>
+    <button data-cell-menu-action="guardRail" role="menuitem">玻璃带玻璃护栏</button>
+    <button data-cell-menu-action="screen" role="menuitem">是否带纱</button>
+    <button data-cell-menu-action="guardRail" role="menuitem">是否带玻璃护栏</button>
+    <button data-cell-menu-action="security" role="menuitem">带防盗条</button>
+    <button data-cell-menu-action="grille" role="menuitem">竖向显示线</button>
+    <button data-cell-menu-action="switchLayout" role="menuitem">切换摆放方式</button>
+    <button data-cell-menu-action="grille" role="menuitem">是否显示玻璃分隔</button>
+    <button data-cell-menu-action="clearGrille" role="menuitem">清空格条</button>
+    <div class="object-menu-separator"></div>
     <button data-cell-menu-type="fixed_glass" role="menuitem">设为固定玻璃</button>
     <button data-cell-menu-type="turn" role="menuitem">设为平开扇</button>
     <button data-cell-menu-type="turn_tilt" role="menuitem">设为内开内倒</button>
@@ -967,11 +1337,42 @@
     <div id="jointMenuTitle" class="object-menu-title">连接节点</div>
     <button id="btnJointMenuEdit" role="menuitem">转角设置</button>
     <button id="btnJointMenuLength" role="menuitem">修改料长</button>
-    <button data-joint-angle="90" role="menuitem">修改角度：90</button>
-    <button data-joint-angle="135" role="menuitem">修改角度：135</button>
-    <button data-joint-angle="180" role="menuitem">修改角度：180</button>
-    <button id="btnJointMenuCustomAngle" role="menuitem">修改角度：自定义</button>
-    <button id="btnJointMenuReplace" role="menuitem">更换转角料</button>
+    <div class="object-submenu" data-corner-only>
+      <button class="object-menu-parent" type="button" role="menuitem" aria-haspopup="true">修改角度 ▸</button>
+      <div class="object-submenu-panel" role="menu">
+        <button data-joint-angle="90" role="menuitem" aria-label="修改角度 ▸ 90">90</button>
+        <button data-joint-angle="135" role="menuitem" aria-label="修改角度 ▸ 135">135</button>
+        <button data-joint-angle="180" role="menuitem" aria-label="修改角度 ▸ 180">180</button>
+        <button id="btnJointMenuCustomAngle" role="menuitem" aria-label="修改角度 ▸ 自定义">自定义</button>
+      </div>
+    </div>
+    <div class="object-submenu" data-corner-only>
+      <button id="btnJointMenuShape" class="object-menu-parent" type="button" role="menuitem" aria-haspopup="true">转角形状 ▸</button>
+      <div class="object-submenu-panel" role="menu">
+        <button data-joint-style="default" role="menuitem">默认转角</button>
+        <button data-joint-style="curved" role="menuitem">弧形面转角</button>
+        <button data-joint-style="universal" role="menuitem">万能转角</button>
+        <button data-joint-style="rectangular" role="menuitem">矩形转角</button>
+        <button data-joint-style="giant" role="menuitem">巨型转角</button>
+      </div>
+    </div>
+    <div class="object-submenu">
+      <button id="btnJointMenuAlias" class="object-menu-parent" type="button" role="menuitem" aria-haspopup="true">型材别名显示设置 ▸</button>
+      <div class="object-submenu-panel" role="menu">
+        <button data-joint-alias="code" role="menuitem">显示型材编码</button>
+        <button data-joint-alias="alias" role="menuitem">显示节点别名</button>
+        <button data-joint-alias="all" role="menuitem">显示编码+别名</button>
+        <button data-joint-alias="hidden" role="menuitem">隐藏型材文字</button>
+      </div>
+    </div>
+    <div class="object-submenu">
+      <button id="btnJointMenuReplace" class="object-menu-parent" type="button" role="menuitem" aria-haspopup="true">更换转角料 ▸</button>
+      <div class="object-submenu-panel" role="menu">
+        <button data-joint-profile="series" role="menuitem">当前系列默认型材</button>
+        <button data-joint-profile="reinforced" role="menuitem">加强型材</button>
+        <button data-joint-profile="custom" role="menuitem">自定义输入</button>
+      </div>
+    </div>
     <button id="btnJointMenuDelete" class="danger" role="menuitem">删除连接节点</button>
   </div>
   <div id="assemblyContextMenu" class="object-menu assembly-object-menu hidden" role="menu" aria-label="拼接窗体操作">
@@ -982,6 +1383,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260912-51"></script>
+  <script type="module" src="assets/app.js?v=20260914-10"></script>
 </body>
 </html>
