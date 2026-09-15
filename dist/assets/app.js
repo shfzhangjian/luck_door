@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260914-11";
+} from "./openings.js?v=20260915-01";
 import {
   createCellId,
   createMemberId,
@@ -1657,6 +1657,52 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       markDirty();
     }
 
+    function localMullionName(orientation) {
+      return orientation === "vertical" ? "竖梃" : "横梃";
+    }
+
+    function localMullionExists(win, row, col, orientation, positionRatio = 0.5) {
+      const cell = win?.layout?.cells?.[cellIndex(row, col, win.layout.columns.length)];
+      if (!cell?.cellId) return false;
+      return Boolean(win.topology?.members?.some(member => (
+        member.hostRegionId === cell.cellId &&
+        member.orientation === orientation &&
+        Math.abs(Number(member.positionRatio ?? 0.5) - positionRatio) < 0.015 &&
+        Math.abs(Number(member.span?.startRatio ?? 0)) < 0.015 &&
+        Math.abs(Number(member.span?.endRatio ?? 1) - 1) < 0.015
+      )));
+    }
+
+    function addSegmentedLocalMullion(win, row, col, orientation, options = {}) {
+      if (!win) return null;
+      const cols = win.layout.columns.length;
+      const targetCell = win.layout.cells[cellIndex(row, col, cols)];
+      if (!targetCell || targetCell.type === "empty") {
+        showToast(`请选择有效窗格后再加入${localMullionName(orientation)}。`);
+        return null;
+      }
+      win.topology = normalizeTopology(win.topology, win.layout);
+      if (localMullionExists(win, row, col, orientation)) {
+        showToast(`该窗格已有局部${localMullionName(orientation)}，未重复叠加。`);
+        return null;
+      }
+      const member = createLocalMullion(
+        win.layout,
+        row,
+        col,
+        orientation,
+        currentSeries(win)?.mullionProfile || ""
+      );
+      win.topology.members.push(member);
+      win.geometryMode = "topology";
+      selectedCell = { row, col };
+      selectedJointId = "";
+      selectedMemberId = member.memberId;
+      switchInspector("member");
+      if (options.markDirty !== false) markDirty();
+      return member;
+    }
+
     function splitSelectedColumn(partCount = 2) {
       const win = currentWindow();
       if (!win) return;
@@ -1665,6 +1711,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const col = Math.min(selectedCell.col, cols - 1);
+      const row = Math.min(selectedCell.row, rows - 1);
+      if (partCount === 2 && rows > 1) {
+        const member = addSegmentedLocalMullion(win, row, col, "vertical");
+        if (member) showToast("已有横向分隔，已在选中窗格加入局部竖梃，未切穿横梃。");
+        return;
+      }
       const oldCells = win.layout.cells;
       const count = Math.max(2, Math.min(6, Number(partCount) || 2));
       const weight = Number(win.layout.columns[col] || 1) / count;
@@ -1692,6 +1744,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const row = Math.min(selectedCell.row, rows - 1);
+      const col = Math.min(selectedCell.col, cols - 1);
+      if (partCount === 2 && cols > 1) {
+        const member = addSegmentedLocalMullion(win, row, col, "horizontal");
+        if (member) showToast("已有竖向分隔，已在选中窗格加入局部横梃，未切穿竖梃。");
+        return;
+      }
       const oldCells = win.layout.cells;
       const count = Math.max(2, Math.min(6, Number(partCount) || 2));
       const weight = Number(win.layout.rows[row] || 1) / count;
@@ -2072,26 +2130,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function addLocalMember(orientation) {
       const win = currentWindow();
       if (!win) return;
-      const cell = currentCell(win);
-      if (cell?.type !== "fixed_glass") {
-        showToast("局部中梃当前仅支持固定玻璃区域，请先将窗格设为固定玻璃。");
-        return;
-      }
-      const member = createLocalMullion(
-        win.layout,
-        selectedCell.row,
-        selectedCell.col,
-        orientation,
-        currentSeries(win)?.mullionProfile || ""
-      );
-      win.topology = normalizeTopology(win.topology, win.layout);
-      win.topology.members.push(member);
-      win.geometryMode = "topology";
-      selectedJointId = "";
-      selectedMemberId = member.memberId;
-      switchInspector("member");
-      markDirty();
-      showToast(`已在选中窗格加入局部${orientation === "vertical" ? "竖梃" : "横梃"}。`);
+      const row = Math.min(selectedCell.row, win.layout.rows.length - 1);
+      const col = Math.min(selectedCell.col, win.layout.columns.length - 1);
+      const member = addSegmentedLocalMullion(win, row, col, orientation);
+      if (member) showToast(`已在选中窗格加入局部${localMullionName(orientation)}。`);
     }
 
     function updateMemberFromInputs() {
@@ -4297,6 +4339,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       parts.push(`<text class="window-mark" x="${view.w / 2}" y="${Math.max(18, y - 38)}">${escapeHtml(win.mark)}</text>`);
       parts.push(renderSurroundElevation(win, x, y, drawW, drawH, scale));
       parts.push(`<path d="${framePath}" fill="${frameColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="2" />`);
+      parts.push(renderProfileBevel(x, y, drawW, drawH, face));
       parts.push(`<rect x="${inner.x}" y="${inner.y}" width="${inner.w}" height="${inner.h}" fill="#f8fbfc" />`);
 
       for (let i = 0; i < rects.length; i += 1) {
@@ -4349,7 +4392,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           if (cellHasCustomShape(win, r, c - 1) || cellHasCustomShape(win, r, c)) continue;
           const bottom = rowEdges[r];
           const top = rowEdges[r + 1];
-          parts.push(`<rect x="${colEdges[c] - face / 2}" y="${bottom}" width="${face}" height="${top - bottom}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          const dividerX = colEdges[c] - face / 2;
+          const dividerY = bottom;
+          const dividerW = face;
+          const dividerH = top - bottom;
+          parts.push(`<rect x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
         }
       }
       for (let r = 1; r < rowEdges.length - 1; r += 1) {
@@ -4357,7 +4405,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const belowRow = r;
         for (let c = 0; c < win.layout.columns.length; c += 1) {
           if (cellHasCustomShape(win, aboveRow, c) || cellHasCustomShape(win, belowRow, c)) continue;
-          parts.push(`<rect x="${colEdges[c]}" y="${rowEdges[r] - face / 2}" width="${colEdges[c + 1] - colEdges[c]}" height="${face}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          const dividerX = colEdges[c];
+          const dividerY = rowEdges[r] - face / 2;
+          const dividerW = colEdges[c + 1] - colEdges[c];
+          const dividerH = face;
+          parts.push(`<rect x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
         }
       }
 
@@ -5118,6 +5171,71 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       </defs>`;
     }
 
+    function renderProfileBevel(x, y, width, height, face) {
+      if (width <= 0 || height <= 0 || face <= 0) return "";
+      const inset = Math.max(3, Math.min(face * 0.24, 13));
+      const innerX = x + face;
+      const innerY = y + face;
+      const innerW = Math.max(0, width - face * 2);
+      const innerH = Math.max(0, height - face * 2);
+      const outerRight = x + width;
+      const outerBottom = y + height;
+      const innerRight = innerX + innerW;
+      const innerBottom = innerY + innerH;
+      const hasInner = innerW > 0 && innerH > 0;
+      const highlights = [
+        `M${x + inset} ${y + inset} H${outerRight - inset}`,
+        `M${x + inset} ${y + inset} V${outerBottom - inset}`
+      ];
+      const shadows = [
+        `M${outerRight - inset} ${y + inset} V${outerBottom - inset}`,
+        `M${x + inset} ${outerBottom - inset} H${outerRight - inset}`
+      ];
+      const grooves = [];
+      const miters = [
+        `M${x} ${y} L${innerX} ${innerY}`,
+        `M${outerRight} ${y} L${innerRight} ${innerY}`,
+        `M${outerRight} ${outerBottom} L${innerRight} ${innerBottom}`,
+        `M${x} ${outerBottom} L${innerX} ${innerBottom}`
+      ];
+      if (hasInner) {
+        const innerGuideX = innerX - inset * 0.42;
+        const innerGuideY = innerY - inset * 0.42;
+        const innerGuideRight = innerRight + inset * 0.42;
+        const innerGuideBottom = innerBottom + inset * 0.42;
+        highlights.push(`M${innerGuideX} ${innerGuideY} H${innerGuideRight}`);
+        highlights.push(`M${innerGuideX} ${innerGuideY} V${innerGuideBottom}`);
+        shadows.push(`M${innerGuideRight} ${innerGuideY} V${innerGuideBottom}`);
+        shadows.push(`M${innerGuideX} ${innerGuideBottom} H${innerGuideRight}`);
+        grooves.push(`M${innerX - inset * 0.45} ${innerY - inset * 0.45} H${innerRight + inset * 0.45} V${innerBottom + inset * 0.45} H${innerX - inset * 0.45} Z`);
+      }
+      return `
+        <g class="profile-bevel-layer">
+          <path class="profile-bevel-highlight" d="${highlights.join(" ")}" />
+          <path class="profile-bevel-shadow" d="${shadows.join(" ")}" />
+          <path class="profile-bevel-miter" d="${miters.join(" ")}" />
+          ${grooves.length ? `<path class="profile-bevel-groove" d="${grooves.join(" ")}" />` : ""}
+        </g>`;
+    }
+
+    function renderProfileDividerBevel(x, y, width, height) {
+      if (width <= 0 || height <= 0) return "";
+      const inset = Math.max(2, Math.min(width, height) * 0.18);
+      const right = x + width;
+      const bottom = y + height;
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
+      const vertical = height >= width;
+      return `
+        <g class="profile-bevel-layer profile-divider-bevel">
+          <path class="profile-bevel-highlight" d="M${x + inset} ${y + inset} H${right - inset} M${x + inset} ${y + inset} V${bottom - inset}" />
+          <path class="profile-bevel-shadow" d="M${right - inset} ${y + inset} V${bottom - inset} M${x + inset} ${bottom - inset} H${right - inset}" />
+          <path class="profile-bevel-groove" d="${vertical
+            ? `M${centerX} ${y + inset} V${bottom - inset}`
+            : `M${x + inset} ${centerY} H${right - inset}`}" />
+        </g>`;
+    }
+
     function renderSurroundElevation(win, x, y, width, height, scale) {
       const geometry = surroundGeometry(win.installation?.surround, win.widthMm, win.heightMm);
       if (!geometry.surround.enabled || !geometry.sides.length) return "";
@@ -5208,6 +5326,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const frameColor = project.viewOptions?.showProfileColor ? profileColor(win.colorInside, series.material) : "#7e8792";
         const framePath = frameShapePath(win, topLeft.x, topLeft.y, drawW, drawH, face);
         parts.push(`<path class="assembly-window-frame" d="${framePath}" fill-rule="evenodd" style="fill:${frameColor}" />`);
+        parts.push(renderProfileBevel(topLeft.x, topLeft.y, drawW, drawH, face));
         parts.push(`<rect class="assembly-window-inner" x="${topLeft.x + face}" y="${topLeft.y + face}" width="${Math.max(0, drawW - face * 2)}" height="${Math.max(0, drawH - face * 2)}" />`);
         const innerWidth = Math.max(0, drawW - face * 2);
         const innerHeight = Math.max(0, drawH - face * 2);
@@ -5730,6 +5849,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           <g class="topology-member ${selected ? "selected" : ""}" data-member-id="${escapeHtml(member.memberId)}" tabindex="0" role="button" aria-label="${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}">
             <rect class="topology-member-hit" x="${x - 4}" y="${y - 4}" width="${Math.max(8, width + 8)}" height="${Math.max(8, height + 8)}" />
             <rect class="topology-member-profile" x="${x}" y="${y}" width="${Math.max(1, width)}" height="${Math.max(1, height)}" fill="${fillColor}" stroke="${outlineColor}" />
+            ${renderProfileDividerBevel(x, y, Math.max(1, width), Math.max(1, height))}
             <text class="topology-member-label" x="${labelX}" y="${labelY}">${memberLabel(member, index)}</text>
           </g>`;
       }).join("");
@@ -5932,6 +6052,22 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return item.y + item.h - handleHeightMm * scale;
     }
 
+    function openingDirectionText(cell) {
+      if (!cell || !isOperableType(cell.type)) return "";
+      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      const opening = String(cell.opening || "");
+      const plane = assembly.openPlane || (opening.endsWith("out") ? "out" : (opening.endsWith("in") ? "in" : ""));
+      if (plane === "out") return "外开";
+      if (plane === "in") return "内开";
+      return "";
+    }
+
+    function openingDirectionSvgLabel(cell, x, y, anchor = "middle") {
+      const label = openingDirectionText(cell);
+      if (!label) return "";
+      return `<text class="opening-direction-label" x="${x}" y="${y}" text-anchor="${anchor}">${escapeHtml(label)}</text>`;
+    }
+
     function openSashElevation(cell, item, outlineColor, frameColor, scale) {
       const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
       const leftHinged = cell.opening?.startsWith("left");
@@ -5944,12 +6080,15 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const perspective = (outward ? -1 : 1) * Math.min(8, item.h * 0.035);
       const handleY = handlePositionY(cell, item, scale);
       const glassFill = cell.type === "door" ? "rgba(185,122,66,0.32)" : "rgba(188,228,246,0.48)";
+      const labelX = (hingeX + freeX) / 2;
+      const labelY = Math.max(item.y + 14, top + 16);
       return `
         <g class="open-sash-elevation">
           <path d="M${hingeX} ${top} L${freeX} ${top + perspective} L${freeX} ${bottom - perspective} L${hingeX} ${bottom} Z"
             fill="${glassFill}" stroke="${outlineColor}" stroke-width="${Math.max(4, Math.min(7, inset * 0.42))}" />
           <line x1="${hingeX}" y1="${top}" x2="${hingeX}" y2="${bottom}" stroke="${frameColor}" stroke-width="3" />
           <line x1="${freeX}" y1="${handleY - 9}" x2="${freeX}" y2="${handleY + 9}" stroke="#8a5a00" stroke-width="4" stroke-linecap="round" />
+          ${openingDirectionSvgLabel(cell, labelX, labelY)}
         </g>
       `;
     }
@@ -7247,11 +7386,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const bottomEdge = item.y + item.h - inset;
       if (cell.type === "top_hung") {
         const dash = opening.endsWith("out") ? "" : "stroke-dasharray='7 5'";
-        return `<path d="M${leftEdge} ${bottomEdge} L${centerX} ${topEdge} L${rightEdge} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
+        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, topEdge + 14)}<path d="M${leftEdge} ${bottomEdge} L${centerX} ${topEdge} L${rightEdge} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
       }
       if (cell.type === "bottom_hung") {
         const dash = opening.endsWith("out") ? "" : "stroke-dasharray='7 5'";
-        return `<path d="M${leftEdge} ${topEdge} L${centerX} ${bottomEdge} L${rightEdge} ${topEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
+        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, bottomEdge - 8)}<path d="M${leftEdge} ${topEdge} L${centerX} ${bottomEdge} L${rightEdge} ${topEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
       }
       if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide"].includes(cell.type)) {
         const rightward = assembly.stackSide === "right";
@@ -7306,7 +7445,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           const x1 = panel.hingeSide === "left" ? panelLeft : panelRight;
           const x2 = panel.hingeSide === "left" ? panelRight : panelLeft;
           const dash = assembly.openPlane === "out" ? "" : "stroke-dasharray='7 5'";
-          return `<path d="M${x1} ${topEdge} L${x2} ${bottomEdge} L${x1} ${bottomEdge} Z" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
+          const panelCell = {
+            ...cell,
+            opening: `${panel.hingeSide}_${assembly.openPlane}`,
+            openingAssembly: { ...assembly, panelCount: 1 }
+          };
+          return `<g class="opening-symbol">${openingDirectionSvgLabel(panelCell, (panelLeft + panelRight) / 2, topEdge + 14)}<path d="M${x1} ${topEdge} L${x2} ${bottomEdge} L${x1} ${bottomEdge} Z" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
         }).join("");
       }
       const left = opening?.startsWith("left");
@@ -7315,7 +7459,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const openX = left ? item.x + item.w - inset : item.x + inset;
       const hingeY = item.y + item.h / 2;
       const dash = out ? "" : "stroke-dasharray='7 5'";
-      return `<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} />`;
+      return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, (hingeX + openX) / 2, topEdge + 14)}<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
     }
 
     function dimensionLine(x1, y1, x2, y2, label, vertical = false, editTarget = "") {

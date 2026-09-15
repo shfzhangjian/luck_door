@@ -103,6 +103,30 @@ assert.ok(
   app.includes("M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}"),
   "Side-hung 2D symbols must use the reference V-shaped opening mark instead of a single diagonal triangle."
 );
+assert.ok(
+  app.includes("function localMullionExists") &&
+  app.includes("function addSegmentedLocalMullion") &&
+  app.includes("已有竖向分隔，已在选中窗格加入局部横梃，未切穿竖梃。") &&
+  app.includes("已有横向分隔，已在选中窗格加入局部竖梃，未切穿横梃。") &&
+  app.includes("该窗格已有局部${localMullionName(orientation)}，未重复叠加。"),
+  "Adding a mullion into an already divided window must create a local segmented mullion and avoid duplicate overlay."
+);
+assert.ok(
+  app.includes("function openingDirectionText") &&
+  app.includes('return "外开";') &&
+  app.includes('return "内开";') &&
+  css.includes(".opening-direction-label"),
+  "2D opening sashes and symbols must show inward/outward direction labels."
+);
+assert.ok(
+  app.includes("function renderProfileBevel") &&
+  app.includes("function renderProfileDividerBevel") &&
+  app.includes("renderProfileBevel(x, y, drawW, drawH, face)") &&
+  app.includes("renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH)") &&
+  css.includes(".profile-bevel-highlight") &&
+  css.includes(".profile-bevel-shadow"),
+  "Frame and mullion profiles must render material depth with bevel/highlight layers."
+);
 assert.ok(css.includes('.preview-visibility input[type="checkbox"]') && css.includes("flex: 0 0 16px"), "3D visibility checkboxes must override the global full-width form-input rule.");
 assert.ok(!css.includes(".preview-mode-fixed"), "The obsolete 3D multi-select banner style must be removed.");
 
@@ -135,4 +159,4 @@ leftBox = layout.find(item => item.windowId === left.windowId);
 rightBox = layout.find(item => item.windowId === right.windowId);
 assert.equal(leftBox.xMm + left.widthMm / 2, rightBox.xMm - right.widthMm / 2, "Resizing a frame must recalculate the neighboring placement and preserve continuity.");
 
-console.log("Physical global editing checks passed: global openings, internal joints, geometry dragging, hosted holes/locks, frame shapes, and 3D visibility.");
+console.log("Physical global editing checks passed: global openings, segmented mullions, internal joints, geometry dragging, hosted holes/locks, frame material, and 3D visibility.");

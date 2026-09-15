@@ -123,7 +123,7 @@ const selection = context({ project: fixture(), document: { getElementById: () =
   dimensionLine: () => "", cellFill: () => "#e3f3fa", cellDecoration: () => "", integratedScreenDecoration: () => "",
   cellDrawingCode: () => "F1", renderCellMarkups: () => "", bindCanvasMarkupPlacement: noop, bindCanvasGeometryDrag: noop,
   frameShapePath: () => "M0 0Z", profileColor: () => "#7e8792", openCellElevation: () => "<g class=\"open-sash-elevation\"></g>",
-  openingSymbol: () => "",
+  openingSymbol: () => "", renderProfileBevel: () => "", renderProfileDividerBevel: () => "",
   renderAssemblyCommandZones: () => "", setCanvasSvgContent: (_, parts) => { rendered = parts.join(""); }
 }, [...planFunctions, "svgPlanDefs", "resolveAssemblyElevationLayout", "renderWindowGeometryHandles", "renderAssemblyWindowCells", "renderAssemblyInternalJointZones", "renderAssemblySvg"]);
 selection.currentProjectAssembly = () => selection.project.assemblies[0];
