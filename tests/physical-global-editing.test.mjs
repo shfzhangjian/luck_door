@@ -189,6 +189,10 @@ assert.ok(
   app.includes("function windowShapeClipForThreeCell") &&
   app.includes("shapeData: clipped.shapeData") &&
   app.includes("function threeCellShapeData(cell, rect)") &&
+  app.includes("function addThreeShapeGlassPane") &&
+  app.includes("const THREE_GLASS_REBATE_OVERLAP_MM = 32") &&
+  app.includes("offsetThreePolygon(basePoints, -glassOverlap)") &&
+  app.includes('userData.mountType = "fixed-shaped-glass"') &&
   app.includes("addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly)") &&
   app.includes("frameShape: true") &&
   app.includes("embeddedShape: shapeData.frameShape") &&
@@ -269,11 +273,13 @@ assert.ok(
 );
 assert.ok(
   app.includes("function renderThroughMullions") &&
-  app.includes("renderThroughMullions(win, assemblyColEdges, assemblyRowEdges, face, frameColor, \"#26393e\")") &&
-  app.includes("renderTopologyMembers(win, assemblyRects, face, frameColor, \"#26393e\")") &&
+  app.includes("renderThroughMullions(win, assemblyColEdges, assemblyRowEdges, face, frameColor, \"#26393e\", frameInfo)") &&
+  app.includes("renderTopologyMembers(win, assemblyRenderRects, face, frameColor, \"#26393e\", frameInfo)") &&
+  app.includes("function offsetPolygonPoints") &&
+  app.includes("function clipPolygonToRectPoints") &&
   app.includes("bindAssemblyTopologyMembers(svg, assembly)") &&
   app.includes("data-member-window"),
-  "Single-window and assembly views must share the same through/local mullion rendering and selection behavior."
+  "Single-window and assembly views must share the same through/local mullion rendering and selection behavior, including shaped DIY geometry."
 );
 assert.ok(
   app.includes("createRootWindowFromCanvasCommand();") &&
@@ -324,8 +330,9 @@ assert.ok(
   app.includes("function resolveCellShapeGeometry(win, item, frame)") &&
   app.includes("function cellRenderItemWithShape(win, item, frame)") &&
   app.includes("function renderAssemblyWindowInternalDimensions(win, topLeft, drawW, drawH, colEdges, rowEdges)") &&
-  app.includes("const singleCell = win?.layout?.columns?.length === 1 && win?.layout?.rows?.length === 1") &&
-  app.includes("const shapePoints = singleCell ? windowInnerShapePoints(win, frame) : []") &&
+  app.includes("const innerShapePoints = windowInnerShapePoints(win, frame)") &&
+  app.includes("const innerShape = windowInnerShapePoints(win, { x, y, w: width, h: height, face: handleFace })") &&
+  app.includes("const clipped = clipPolygonToRectPoints(innerShapePoints, item)") &&
   app.includes("function renderOpenCellAboveFrame(cell)") &&
   app.includes("function renderWindowFrameOcclusion(win, x, y, width, height, face, frameColor, outlineColor") &&
   app.includes("function cellOpeningRatio") &&
@@ -338,7 +345,35 @@ assert.ok(
   app.includes("function closedCellElevation") &&
   app.includes("function projectMarkupPointForOpenSash") &&
   app.includes("renderProfileBevel(x, y, drawW, drawH, face, win)") &&
-  app.includes("renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH)") &&
+  app.includes("function clipPolygonToPolygonPoints(points, clipPoints)") &&
+  app.includes("function clipPolygonToPolygonPieces(points, clipPoints)") &&
+  app.includes("function frameOuterClipPoints(win, frame)") &&
+  app.includes("function memberStripPoints(axis, center, start, end, thickness)") &&
+  app.includes("function clippedMemberPolygon2d(strip, clipPoints)") &&
+  app.includes("function clippedMemberPolygons2d(strip, clipPoints)") &&
+  app.includes('memberStripPoints("vertical", x, dividerY, dividerY + dividerH, face)') &&
+  app.includes("renderProfileDividerBevel(x, y, width, height)") &&
+  app.includes("const rowEdges = rectsToEdges([...win.layout.rows].reverse(), -innerH / 2, innerH)") &&
+  app.includes('const lineRange = hasInnerShape ? polygonLineRangePoints(innerShape, "vertical", colEdges[index]) : null') &&
+  app.includes('const lineRange = hasInnerShape ? polygonLineRangePoints(innerShape, "horizontal", rowEdges[index]) : null') &&
+  app.includes("const memberOverlap = Math.max(connectorOverlap, face * 0.55)") &&
+  app.includes("const windowShapePoints = isRectangularWindowShape(win) ? null : threeFrameOpeningPoints3d(win, frameW, frameH, face)") &&
+  app.includes("const memberClipPoints = shapePoints ? (windowOuterPoints || shapePoints) : null") &&
+  app.includes("function threeAxisAlignedBoxForPolygon(points)") &&
+  app.includes("function isThreePolygonConvex(points)") &&
+  app.includes("function clipThreePolygonToSimplePolygonPieces(points, clipPoints)") &&
+  app.includes("clipThreePolygonToSimplePolygonPieces(strip, frameOuter)") &&
+  app.includes("clipThreePolygonToSimplePolygonPieces(strip, memberClipPoints)") &&
+  app.includes("frameOuterPoints: windowShapeClip ? windowShapePoints3d(win, width, height) : null") &&
+  app.includes("clipThreePolygonToSimplePolygonPieces(expandedPoints, rect.frameOuterPoints)") &&
+  app.includes('"through-mullion-clipped", depth * 0.018') &&
+  app.includes('"local-mullion-clipped", depth * 0.026') &&
+  app.includes("selectionObject: sash") &&
+  app.includes("const shapeObject = part.selectionObject || part.object") &&
+  app.includes("shapeObject.updateMatrixWorld(true)") &&
+  app.includes("applyMatrix4(shapeObject.matrixWorld)") &&
+  app.includes("mesh.position.z = zOffset") &&
+  app.includes("mesh.renderOrder = zOffset > 0 ? 12 : 10") &&
   app.includes("closedCellElevation(cell, item, outlineColor, frameColor, scale)") &&
   app.includes("openingSymbol(cell, symbolItem, symbolInset)") &&
   app.includes("slidingSashElevation(cell, item, outlineColor, frameColor, scale, false)") &&

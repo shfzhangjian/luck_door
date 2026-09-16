@@ -82,6 +82,7 @@ Open Frame Studio = 技术参考 / 算法参考 / 原型验证
 - `dist/assets/app.js`：设计、算料、BOM和接口包逻辑
 - `docs/door-window-design.v1.schema.json`：第一版规则网格设计 JSON 结构
 - `docs/door-window-design.v2.schema.json`：兼容规则网格并支持框段、区域、局部中梃、项目级拼接/转角节点及多窗组合定位的设计 JSON 结构
+- `docs/technical-architecture-roadmap.md`：前端、后端、对象树、CAD/Blender互通和系统演进的技术架构执行路线
 - `docs/drawing-product-function-plan.md`：绘图工具、包套、转角节点和多窗组合的产品规划
 - `docs/manufacturing-package.v1.md`：后续 MES / ERP / WMS / 设备适配接口包说明
 - `docs/opening-combinations-roadmap.md`：已实现组合和后续开合方式计划

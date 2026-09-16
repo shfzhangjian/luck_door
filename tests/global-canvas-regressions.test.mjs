@@ -127,6 +127,7 @@ const selection = context({ project: fixture(), document: { getElementById: () =
   cellDrawingCode: () => "F1", renderCellMarkups: () => "", renderWindowRootMarkups: () => "", bindCanvasMarkupPlacement: noop, bindCanvasGeometryDrag: noop,
   frameShapePath: () => "M0 0Z", profileColor: () => "#7e8792", openCellElevation: () => "<g class=\"open-sash-elevation\"></g>",
   cellRenderItemWithShape: (_, item) => item, renderWindowFrameOcclusion: () => "", windowInnerFillPath: () => "",
+  windowInnerShapePoints: () => [], polygonLineRangePoints: () => null,
   renderAssemblyWindowInternalDimensions: () => "", renderCustomShapeAnnotations: () => "",
   openingSymbol: () => "", renderProfileBevel: () => "", renderProfileDividerBevel: () => "",
   renderThroughMullions: () => "", renderTopologyMembers: () => "", bindAssemblyTopologyMembers: noop,

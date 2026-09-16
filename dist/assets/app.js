@@ -71,6 +71,8 @@ const PROJECT_LIBRARY_KEY = "doormes-designer-project-library-v1";
 const CUSTOM_WINDOW_LIBRARY_KEY = "doormes-designer-custom-window-library-v1";
 const THREE_MODULE_URL = "three";
 const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
+const THREE_FRAME_MEMBER_JOIN_MM = 24;
+const THREE_GLASS_REBATE_OVERLAP_MM = 32;
 const SHAPE_PRESETS = Object.freeze([
   { type: "rectangular", label: "四边框", icon: "□", description: "标准矩形洞口和窗框" },
   { type: "arched", label: "上拱框", icon: "⌒", description: "顶部拱形固定或拼接窗" },
@@ -130,6 +132,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     let jointPositionDialogMode = "joint";
     let pendingConnectedShapeType = "rectangular";
     let pendingShapePlacementType = "rectangular";
+    let pendingCustomShapePlacementId = "";
     let canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "", cellPreset: "", cellOpening: "", cellPanels: "", cellTracks: "", panelMode: "", markupType: "" };
     let canvasViewport = { scale: 1, x: 0, y: 0 };
     let canvasPan = { active: false, pointerId: 0, startX: 0, startY: 0, originX: 0, originY: 0 };
@@ -2616,20 +2619,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
     function applyCustomShapeElement(shapeId) {
-      const win = currentWindow();
       const item = project.customShapes?.find(shape => shape.shapeId === shapeId);
-      const cell = currentCell(win);
-      if (!win || !cell || !item) return;
-      cell.customShape = normalizeCellCustomShape({
-        shapeId: item.shapeId,
-        name: item.name,
-        points: item.points
-      });
-      selectedMemberId = "";
-      selectedJointId = "";
-      switchInspector("cell");
-      markDirty();
-      showToast(`已将DIY异形构件“${item.name}”应用到选中窗格。`);
+      if (!item) return;
+      if (currentWindow()) {
+        openCustomShapePlacementDialog(item.shapeId);
+        return;
+      }
+      createWindowFromCustomShapeElement(item);
     }
 
     function editCustomShapeElement(shapeId) {
@@ -3269,10 +3265,32 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const win = currentWindow();
       if (!win) return;
       pendingShapePlacementType = SHAPE_PRESET_BY_TYPE[type] ? type : "rectangular";
+      pendingCustomShapePlacementId = "";
       const dialog = document.getElementById("shapePlacementDialog");
       const subtitle = document.getElementById("shapePlacementSubtitle");
+      const replaceButton = dialog?.querySelector('[data-shape-placement="replace"]');
+      replaceButton?.classList.remove("hidden");
+      replaceButton?.removeAttribute("aria-hidden");
       if (subtitle) {
         subtitle.textContent = `${win.mark} 已选中，要把${shapeLabel(pendingShapePlacementType)}替换当前窗框，还是在上下左右新增？`;
+      }
+      if (dialog?.showModal && !dialog.open) dialog.showModal();
+    }
+
+    function openCustomShapePlacementDialog(shapeId) {
+      const win = currentWindow();
+      if (!win) return;
+      const item = project.customShapes?.find(shape => shape.shapeId === shapeId);
+      if (!item) return;
+      pendingShapePlacementType = "custom_polygon";
+      pendingCustomShapePlacementId = item.shapeId;
+      const dialog = document.getElementById("shapePlacementDialog");
+      const subtitle = document.getElementById("shapePlacementSubtitle");
+      const replaceButton = dialog?.querySelector('[data-shape-placement="replace"]');
+      replaceButton?.classList.add("hidden");
+      replaceButton?.setAttribute("aria-hidden", "true");
+      if (subtitle) {
+        subtitle.textContent = `${win.mark} 已选中，请选择把DIY窗框“${item.name}”新增到哪个方向。`;
       }
       if (dialog?.showModal && !dialog.open) dialog.showModal();
     }
@@ -3284,7 +3302,17 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function chooseShapePlacement(action) {
       const type = pendingShapePlacementType || "rectangular";
+      const customShapeId = pendingCustomShapePlacementId;
       closeShapePlacementDialog();
+      if (customShapeId) {
+        const item = project.customShapes?.find(shape => shape.shapeId === customShapeId);
+        pendingCustomShapePlacementId = "";
+        if (!item) return;
+        if (["left", "right", "top", "bottom"].includes(action)) {
+          createWindowFromCustomShapeElement(item, { dock: action });
+        }
+        return;
+      }
       if (action === "replace") {
         createWindowFromShapePreset(type, { replace: true });
         return;
@@ -3345,6 +3373,51 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       markDirty();
       showToast(`已在${referenceWindow ? dockLabel(options.dock || "right") : "画布"}${referenceWindow && selectedPlacementId && currentPlacement()?.note ? "插入" : "生成"}${shapeLabel(type)}窗框。`);
+    }
+
+    function createWindowFromCustomShapeElement(item, options = {}) {
+      const referenceWindow = currentWindow();
+      const shape = normalizeWindowShape({
+        type: "custom_polygon",
+        points: item.points
+      });
+      const win = createWindow({
+        mark: nextWindowMark(),
+        name: item.name || "DIY异形框",
+        widthMm: referenceWindow?.widthMm || 1200,
+        heightMm: referenceWindow?.heightMm || 1500,
+        shape,
+        layout: {
+          columns: [1],
+          rows: [1],
+          cells: [{ type: "fixed_glass", opening: "fixed" }]
+        }
+      });
+      project.windows.push(win);
+      selectedWindowId = win.windowId;
+      selectedCell = { row: 0, col: 0 };
+      selectedMemberId = "";
+      selectedJointId = "";
+      selectedMarkupId = "";
+      selectedAssemblyId = "";
+      selectedPlacementId = "";
+      if (referenceWindow) {
+        const assembly = ensureAssemblyForReference(referenceWindow);
+        const placementDock = ["left", "right", "top", "bottom", "free"].includes(options.dock) ? options.dock : "right";
+        const anchor = insertionAnchorForSide(assembly, referenceWindow, placementDock);
+        const placement = createAssemblyPlacement(win.windowId, anchor.referenceWindow.windowId, anchor.dock, { gapMm: 0, rotationDeg: 0 });
+        const insertedCount = addAssemblyPlacementWithInsert(assembly, placement, anchor.referenceWindow, win);
+        selectedAssemblyId = assembly.assemblyId;
+        selectedPlacementId = placement.placementId;
+        drawingMode = "assembly";
+        switchInspector("assembly");
+        if (insertedCount) placement.note = `已插入${insertedCount}樘相邻窗前`;
+      } else {
+        drawingMode = "window";
+        switchInspector("window");
+      }
+      markDirty();
+      showToast(`已在${referenceWindow ? dockLabel(options.dock || "right") : "画布"}新增DIY窗框“${item.name || "DIY异形框"}”。`);
     }
 
     function createRootWindowFromCanvasCommand() {
@@ -4998,6 +5071,96 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       });
     }
 
+    function pointArraysToObjects(points) {
+      return (points || []).map(point => ({ x: point[0], y: point[1] }));
+    }
+
+    function pointObjectsToArrays(points) {
+      return (points || []).map(point => [point.x, point.y]);
+    }
+
+    function offsetPolygonPoints(points, inset) {
+      const offset = offsetThreePolygon(pointArraysToObjects(points), inset);
+      return pointObjectsToArrays(offset);
+    }
+
+    function clipPolygonToRectPoints(points, box) {
+      const clipped = clipThreePolygonToBox(
+        pointArraysToObjects(points),
+        box.x,
+        box.x + box.w,
+        box.y,
+        box.y + box.h
+      );
+      return pointObjectsToArrays(clipped);
+    }
+
+    function clipPolygonToPolygonPoints(points, clipPoints) {
+      return clipPolygonToPolygonPieces(points, clipPoints)[0] || [];
+    }
+
+    function clipPolygonToPolygonPieces(points, clipPoints) {
+      return clipThreePolygonToSimplePolygonPieces(pointArraysToObjects(points), pointArraysToObjects(clipPoints))
+        .map(pointObjectsToArrays);
+    }
+
+    function polygonLineRangePoints(points, axis, value) {
+      return threePolygonLineRange(pointArraysToObjects(points), axis, value);
+    }
+
+    function polygonClipMatchesRect(points, box) {
+      return threeClipIsFullBox(
+        pointArraysToObjects(points),
+        box.x,
+        box.x + box.w,
+        box.y,
+        box.y + box.h
+      );
+    }
+
+    function rectPolygonPoints(x, y, w, h) {
+      return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    }
+
+    function frameOuterClipPoints(win, frame) {
+      const shaped = windowOuterShapePoints(win, frame);
+      return shaped.length >= 3 ? shaped : rectPolygonPoints(frame.x, frame.y, frame.w, frame.h);
+    }
+
+    function frameInnerClipPoints(win, frame) {
+      const shaped = windowInnerShapePoints(win, frame);
+      const face = Number(frame?.face || 0);
+      return shaped.length >= 3
+        ? shaped
+        : rectPolygonPoints(frame.x + face, frame.y + face, Math.max(0, frame.w - face * 2), Math.max(0, frame.h - face * 2));
+    }
+
+    function memberJoinOverlapPx(face) {
+      return Math.max(0, Number(face || 0) * 0.62);
+    }
+
+    function memberStripPoints(axis, center, start, end, thickness) {
+      const half = Math.max(0.5, Number(thickness || 0) / 2);
+      if (axis === "horizontal") {
+        const left = Math.min(start, end);
+        const right = Math.max(start, end);
+        return [[left, center - half], [right, center - half], [right, center + half], [left, center + half]];
+      }
+      const top = Math.min(start, end);
+      const bottom = Math.max(start, end);
+      return [[center - half, top], [center + half, top], [center + half, bottom], [center - half, bottom]];
+    }
+
+    function clippedMemberPolygon2d(strip, clipPoints) {
+      if (!Array.isArray(strip) || strip.length < 3 || !Array.isArray(clipPoints) || clipPoints.length < 3) return [];
+      return clipPolygonToPolygonPieces(strip, clipPoints)[0] || [];
+    }
+
+    function clippedMemberPolygons2d(strip, clipPoints) {
+      if (!Array.isArray(strip) || strip.length < 3 || !Array.isArray(clipPoints) || clipPoints.length < 3) return [];
+      return clipPolygonToPolygonPieces(strip, clipPoints);
+    }
+
     function bezierPoint(start, control, end, t) {
       const inv = 1 - t;
       return [
@@ -5109,7 +5272,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       if (type === "custom_polygon") {
         const outer = normalizeShapePoints(shape.points).map(point => [x + point.x / 100 * w, y + point.y / 100 * h]);
-        const inner = insetPolygonTowardCentroid(outer, Math.min(face, w * 0.18, h * 0.18));
+        const inner = offsetPolygonPoints(outer, face);
         return inner.length >= 3 ? inner : [];
       }
       return [];
@@ -5120,10 +5283,15 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (customPoints.length >= 3) {
         return { points: customPoints, path: polygonPath(customPoints) };
       }
-      const singleCell = win?.layout?.columns?.length === 1 && win?.layout?.rows?.length === 1;
-      const shapePoints = singleCell ? windowInnerShapePoints(win, frame) : [];
-      if (shapePoints.length >= 3) {
-        return { points: shapePoints, path: polygonPath(shapePoints) };
+      const innerShapePoints = windowInnerShapePoints(win, frame);
+      if (innerShapePoints.length >= 3) {
+        const clipped = clipPolygonToRectPoints(innerShapePoints, item);
+        if (clipped.length >= 3 && !polygonClipMatchesRect(clipped, item)) {
+          return { points: clipped, path: polygonPath(clipped) };
+        }
+        if (win?.layout?.columns?.length === 1 && win?.layout?.rows?.length === 1) {
+          return { points: innerShapePoints, path: polygonPath(innerShapePoints) };
+        }
       }
       return { points: [], path: "" };
     }
@@ -5337,30 +5505,47 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return parts.join("");
     }
 
-    function renderThroughMullions(win, colEdges, rowEdges, face, fillColor, outlineColor) {
+    function renderThroughMullions(win, colEdges, rowEdges, face, fillColor, outlineColor, frame = null) {
       const parts = [];
+      const clipPoints = frame ? frameOuterClipPoints(win, frame) : [];
+      const shapedFrame = frame && !isRectangularWindowShape(win) && clipPoints.length >= 3;
+      const join = memberJoinOverlapPx(face);
+      const renderMember = (x, y, width, height, strip = null) => {
+        if (shapedFrame) {
+          const clippedPieces = clippedMemberPolygons2d(strip || rectPolygonPoints(x, y, width, height), clipPoints);
+          if (clippedPieces.length) {
+            clippedPieces.forEach(clipped => {
+              parts.push(`<path class="through-mullion-profile" d="${polygonPath(clipped)}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+            });
+            return;
+          }
+        }
+        parts.push(`<rect class="through-mullion-profile" x="${x}" y="${y}" width="${width}" height="${height}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+        parts.push(renderProfileDividerBevel(x, y, width, height));
+      };
       for (let c = 1; c < colEdges.length - 1; c += 1) {
+        const x = colEdges[c];
         for (let r = 0; r < win.layout.rows.length; r += 1) {
           if (cellHasCustomShape(win, r, c - 1) || cellHasCustomShape(win, r, c)) continue;
-          const dividerX = colEdges[c] - face / 2;
-          const dividerY = rowEdges[r];
+          const dividerY = rowEdges[r] - (r === 0 ? face : join);
           const dividerW = face;
-          const dividerH = rowEdges[r + 1] - rowEdges[r];
-          parts.push(`<rect class="through-mullion-profile" x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
-          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
+          const dividerH = rowEdges[r + 1] - rowEdges[r] + (r === 0 ? face : join) + (r === win.layout.rows.length - 1 ? face : join);
+          const strip = memberStripPoints("vertical", x, dividerY, dividerY + dividerH, face);
+          renderMember(colEdges[c] - face / 2, dividerY, dividerW, dividerH, strip);
         }
       }
       for (let r = 1; r < rowEdges.length - 1; r += 1) {
         const aboveRow = r - 1;
         const belowRow = r;
+        const y = rowEdges[r];
         for (let c = 0; c < win.layout.columns.length; c += 1) {
           if (cellHasCustomShape(win, aboveRow, c) || cellHasCustomShape(win, belowRow, c)) continue;
-          const dividerX = colEdges[c];
+          const dividerX = colEdges[c] - (c === 0 ? face : join);
           const dividerY = rowEdges[r] - face / 2;
-          const dividerW = colEdges[c + 1] - colEdges[c];
+          const dividerW = colEdges[c + 1] - colEdges[c] + (c === 0 ? face : join) + (c === win.layout.columns.length - 1 ? face : join);
           const dividerH = face;
-          parts.push(`<rect class="through-mullion-profile" x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
-          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
+          const strip = memberStripPoints("horizontal", y, dividerX, dividerX + dividerW, face);
+          renderMember(dividerX, dividerY, dividerW, dividerH, strip);
         }
       }
       return parts.join("");
@@ -5517,9 +5702,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const dividerColor = frameColor;
       const colEdges = rectsToEdges(win.layout.columns, inner.x, inner.w);
       const rowEdges = rectsToEdges(win.layout.rows, inner.y, inner.h);
-      parts.push(renderThroughMullions(win, colEdges, rowEdges, face, dividerColor, outlineColor));
+      parts.push(renderThroughMullions(win, colEdges, rowEdges, face, dividerColor, outlineColor, frameInfo));
 
-      parts.push(renderTopologyMembers(win, rects, face, dividerColor, outlineColor));
+      parts.push(renderTopologyMembers(win, renderRects, face, dividerColor, outlineColor, frameInfo));
       if (options.showOpenState) {
         parts.push(renderWindowFrameOcclusion(win, x, y, drawW, drawH, face, frameColor, outlineColor));
         if (foregroundOpenCells.length) {
@@ -5804,6 +5989,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function renderWindowGeometryHandles(win, x, y, width, height, inner, scale, colEdges, rowEdges) {
       if (canvasCommand.mode) return "";
       const handleFace = Math.max(10, Number(currentSeries(win).faceWidthMm || 70) * scale);
+      const innerShape = windowInnerShapePoints(win, { x, y, w: width, h: height, face: handleFace });
+      const hasInnerShape = innerShape.length >= 3;
+      const hitPad = Math.max(10, handleFace * 0.7);
+      const hitSize = Math.max(20, handleFace * 1.4);
       const attrs = `data-geometry-window="${escapeHtml(win.windowId)}" data-unit-scale="${scale}"`;
       const parts = [`<g class="geometry-drag-layer" aria-label="拖动调整窗体尺寸和中梃比例">`];
       parts.push(`<g class="geometry-drag-handle window-width-handle" ${attrs} data-geometry-kind="window" data-geometry-axis="width" tabindex="0">
@@ -5817,19 +6006,29 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       for (let index = 1; index < colEdges.length - 1; index += 1) {
         const dividerIndex = index - 1;
         const selected = selectedDividerMatches(win, "column", dividerIndex);
+        const lineRange = hasInnerShape ? polygonLineRangePoints(innerShape, "vertical", colEdges[index]) : null;
+        const lineTop = lineRange ? lineRange.start : inner.y;
+        const lineBottom = lineRange ? lineRange.end : inner.y + inner.h;
+        if (lineBottom <= lineTop) continue;
+        const circleY = lineTop + Math.min(12, (lineBottom - lineTop) / 2);
         parts.push(`<g class="geometry-drag-handle mullion-drag-handle ${selected ? "selected" : ""}" ${attrs} data-geometry-kind="divider" data-geometry-axis="column" data-geometry-index="${dividerIndex}" tabindex="0" aria-label="${escapeHtml(throughDividerLabel("column", dividerIndex))}">
-          <rect class="geometry-drag-hit" x="${colEdges[index] - Math.max(10, handleFace * 0.7)}" y="${inner.y}" width="${Math.max(20, handleFace * 1.4)}" height="${inner.h}" />
-          <line x1="${colEdges[index]}" y1="${inner.y}" x2="${colEdges[index]}" y2="${inner.y + inner.h}" />
-          <circle cx="${colEdges[index]}" cy="${inner.y + 12}" r="6" />
+          <rect class="geometry-drag-hit" x="${colEdges[index] - hitPad}" y="${lineTop}" width="${hitSize}" height="${lineBottom - lineTop}" />
+          <line x1="${colEdges[index]}" y1="${lineTop}" x2="${colEdges[index]}" y2="${lineBottom}" />
+          <circle cx="${colEdges[index]}" cy="${circleY}" r="6" />
         </g>`);
       }
       for (let index = 1; index < rowEdges.length - 1; index += 1) {
         const dividerIndex = index - 1;
         const selected = selectedDividerMatches(win, "row", dividerIndex);
+        const lineRange = hasInnerShape ? polygonLineRangePoints(innerShape, "horizontal", rowEdges[index]) : null;
+        const lineLeft = lineRange ? lineRange.start : inner.x;
+        const lineRight = lineRange ? lineRange.end : inner.x + inner.w;
+        if (lineRight <= lineLeft) continue;
+        const circleX = lineLeft + Math.min(12, (lineRight - lineLeft) / 2);
         parts.push(`<g class="geometry-drag-handle mullion-drag-handle ${selected ? "selected" : ""}" ${attrs} data-geometry-kind="divider" data-geometry-axis="row" data-geometry-index="${dividerIndex}" tabindex="0" aria-label="${escapeHtml(throughDividerLabel("row", dividerIndex))}">
-          <rect class="geometry-drag-hit" x="${inner.x}" y="${rowEdges[index] - Math.max(10, handleFace * 0.7)}" width="${inner.w}" height="${Math.max(20, handleFace * 1.4)}" />
-          <line x1="${inner.x}" y1="${rowEdges[index]}" x2="${inner.x + inner.w}" y2="${rowEdges[index]}" />
-          <circle cx="${inner.x + 12}" cy="${rowEdges[index]}" r="6" />
+          <rect class="geometry-drag-hit" x="${lineLeft}" y="${rowEdges[index] - hitPad}" width="${lineRight - lineLeft}" height="${hitSize}" />
+          <line x1="${lineLeft}" y1="${rowEdges[index]}" x2="${lineRight}" y2="${rowEdges[index]}" />
+          <circle cx="${circleX}" cy="${rowEdges[index]}" r="6" />
         </g>`);
       }
       parts.push("</g>");
@@ -6799,8 +6998,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           frameInfo,
           foregroundOpenCells
         }));
-        parts.push(renderThroughMullions(win, assemblyColEdges, assemblyRowEdges, face, frameColor, "#26393e"));
-        parts.push(renderTopologyMembers(win, assemblyRects, face, frameColor, "#26393e"));
+        parts.push(renderThroughMullions(win, assemblyColEdges, assemblyRowEdges, face, frameColor, "#26393e", frameInfo));
+        parts.push(renderTopologyMembers(win, assemblyRenderRects, face, frameColor, "#26393e", frameInfo));
         if (project.viewOptions?.showOpenState) {
           parts.push(renderWindowFrameOcclusion(win, topLeft.x, topLeft.y, drawW, drawH, face, frameColor, "#26393e", "assembly-window-frame-occlusion"));
           if (foregroundOpenCells.length) {
@@ -7290,37 +7489,75 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return { item, points, content: parts.join("") };
     }
 
-    function renderTopologyMembers(win, rects, face, fillColor, outlineColor) {
+    function renderTopologyMembers(win, rects, face, fillColor, outlineColor, frame = null) {
       if (!win.topology?.members?.length) return "";
+      const frameClip = frame ? frameOuterClipPoints(win, frame) : [];
+      const join = memberJoinOverlapPx(face);
       return win.topology.members.map((member, index) => {
         const host = rects.find(item => item.cell.cellId === member.hostRegionId);
         if (!host) return "";
         const selected = member.memberId === selectedMemberId;
-        const thickness = Math.max(7, face * 0.82);
-        let x;
-        let y;
-        let width;
-        let height;
+        const thickness = Math.max(7, face);
+        const shapePoints = Array.isArray(host.shapePoints) && host.shapePoints.length >= 3 ? host.shapePoints : [];
+        const startsAtBoundary = Number(member.span?.startRatio || 0) <= 0.001;
+        const endsAtBoundary = Number(member.span?.endRatio || 0) >= 0.999;
+        let x = host.x;
+        let y = host.y;
+        let width = 0;
+        let height = 0;
+        let profilePieces = [];
+        let labelX;
+        let labelY;
+        let dotX;
+        let dotY;
         if (member.orientation === "horizontal") {
-          x = host.x + host.w * member.span.startRatio;
-          y = host.y + host.h * member.positionRatio - thickness / 2;
-          width = host.w * (member.span.endRatio - member.span.startRatio);
+          const centerY = host.y + host.h * member.positionRatio;
+          const range = shapePoints.length ? polygonLineRangePoints(shapePoints, "horizontal", centerY) : null;
+          const chordStart = range ? range.start : host.x;
+          const chordEnd = range ? range.end : host.x + host.w;
+          const chordWidth = Math.max(0, chordEnd - chordStart);
+          const startX = chordStart + chordWidth * member.span.startRatio - (shapePoints.length && startsAtBoundary ? join : 0);
+          const endX = chordStart + chordWidth * member.span.endRatio + (shapePoints.length && endsAtBoundary ? join : 0);
+          x = Math.min(startX, endX);
+          y = centerY - thickness / 2;
+          width = Math.abs(endX - startX);
           height = thickness;
+          const strip = memberStripPoints("horizontal", centerY, startX, endX, thickness);
+          const clip = shapePoints.length ? (frameClip.length >= 3 ? frameClip : shapePoints) : [];
+          profilePieces = clip.length >= 3 ? clippedMemberPolygons2d(strip, clip) : [];
+          dotY = centerY;
+          const profilePoints = profilePieces.flat();
+          dotX = profilePoints.length >= 3 ? boundsForPoints(profilePoints).x + boundsForPoints(profilePoints).w / 2 : host.x + host.w * 0.5;
         } else {
-          x = host.x + host.w * member.positionRatio - thickness / 2;
-          y = host.y + host.h * member.span.startRatio;
+          const centerX = host.x + host.w * member.positionRatio;
+          const range = shapePoints.length ? polygonLineRangePoints(shapePoints, "vertical", centerX) : null;
+          const chordStart = range ? range.start : host.y;
+          const chordEnd = range ? range.end : host.y + host.h;
+          const chordHeight = Math.max(0, chordEnd - chordStart);
+          const startY = chordStart + chordHeight * member.span.startRatio - (shapePoints.length && startsAtBoundary ? join : 0);
+          const endY = chordStart + chordHeight * member.span.endRatio + (shapePoints.length && endsAtBoundary ? join : 0);
+          x = centerX - thickness / 2;
+          y = Math.min(startY, endY);
           width = thickness;
-          height = host.h * (member.span.endRatio - member.span.startRatio);
+          height = Math.abs(endY - startY);
+          const strip = memberStripPoints("vertical", centerX, startY, endY, thickness);
+          const clip = shapePoints.length ? (frameClip.length >= 3 ? frameClip : shapePoints) : [];
+          profilePieces = clip.length >= 3 ? clippedMemberPolygons2d(strip, clip) : [];
+          dotX = centerX;
+          const profilePoints = profilePieces.flat();
+          dotY = profilePoints.length >= 3 ? boundsForPoints(profilePoints).y + boundsForPoints(profilePoints).h / 2 : host.y + host.h * 0.5;
         }
-        const labelX = x + width / 2;
-        const labelY = y + Math.min(height / 2, 14);
-        const dotY = member.orientation === "horizontal" ? y + height / 2 : host.y + host.h * 0.5;
-        const dotX = member.orientation === "horizontal" ? host.x + host.w * 0.5 : x + width / 2;
+        if (width <= 0 || height <= 0) return "";
+        const profilePoints = profilePieces.flat();
+        const profileBounds = profilePoints.length >= 3 ? boundsForPoints(profilePoints) : { x, y, w: width, h: height };
+        labelX = profileBounds.x + profileBounds.w / 2;
+        labelY = profileBounds.y + Math.min(profileBounds.h / 2, 14);
         return `
           <g class="topology-member ${selected ? "selected" : ""}" data-member-window="${escapeHtml(win.windowId)}" data-member-id="${escapeHtml(member.memberId)}" data-member-orientation="${escapeHtml(member.orientation)}" data-member-host-x="${host.x}" data-member-host-y="${host.y}" data-member-host-w="${host.w}" data-member-host-h="${host.h}" tabindex="0" role="button" aria-label="${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}">
-            <rect class="topology-member-hit" x="${x - 4}" y="${y - 4}" width="${Math.max(8, width + 8)}" height="${Math.max(8, height + 8)}" />
-            <rect class="topology-member-profile" x="${x}" y="${y}" width="${Math.max(1, width)}" height="${Math.max(1, height)}" fill="${fillColor}" stroke="${outlineColor}" />
-            ${renderProfileDividerBevel(x, y, Math.max(1, width), Math.max(1, height))}
+            <rect class="topology-member-hit" x="${profileBounds.x - 4}" y="${profileBounds.y - 4}" width="${Math.max(8, profileBounds.w + 8)}" height="${Math.max(8, profileBounds.h + 8)}" />
+            ${profilePieces.length
+              ? profilePieces.map(profilePolygon => `<path class="topology-member-profile" d="${polygonPath(profilePolygon)}" fill="${fillColor}" stroke="${outlineColor}" />`).join("")
+              : `<rect class="topology-member-profile" x="${x}" y="${y}" width="${Math.max(1, width)}" height="${Math.max(1, height)}" fill="${fillColor}" stroke="${outlineColor}" />${renderProfileDividerBevel(x, y, Math.max(1, width), Math.max(1, height))}`}
             <circle class="topology-member-drag-dot" cx="${dotX}" cy="${dotY}" r="5" />
             <text class="topology-member-label" x="${labelX}" y="${labelY}">${memberLabel(member, index)}</text>
           </g>`;
@@ -7750,22 +7987,19 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const next = outer[(index + 1) % outer.length];
         return Math.hypot(next[0] - point[0], next[1] - point[1]) * 0.28;
       })));
-      const inner = insetPolygonTowardCentroid(outer, safeFace);
+      const inner = offsetPolygonPoints(outer, safeFace);
+      if (inner.length < 3) return "";
       const bodyPath = polygonFramePath(outer, inner);
-      const last = outer.length - 1;
-      const innerLast = inner.length - 1;
-      const highlights = [
-        `M${outer[0][0]} ${outer[0][1]} L${outer[1][0]} ${outer[1][1]}`,
-        `M${outer[last][0]} ${outer[last][1]} L${outer[0][0]} ${outer[0][1]}`,
-        `M${inner[0][0]} ${inner[0][1]} L${inner[1][0]} ${inner[1][1]}`,
-        `M${inner[innerLast][0]} ${inner[innerLast][1]} L${inner[0][0]} ${inner[0][1]}`
-      ];
-      const shadows = [
-        `M${outer[1][0]} ${outer[1][1]} L${outer[2][0]} ${outer[2][1]}`,
-        `M${outer[2][0]} ${outer[2][1]} L${outer[3][0]} ${outer[3][1]}`,
-        `M${inner[1][0]} ${inner[1][1]} L${inner[2][0]} ${inner[2][1]}`,
-        `M${inner[2][0]} ${inner[2][1]} L${inner[3][0]} ${inner[3][1]}`
-      ];
+      const highlights = [];
+      const shadows = [];
+      outer.forEach((point, index) => {
+        const next = outer[(index + 1) % outer.length];
+        const innerPoint = inner[index];
+        const innerNext = inner[(index + 1) % inner.length];
+        const target = index < Math.ceil(outer.length / 2) ? highlights : shadows;
+        target.push(`M${point[0]} ${point[1]} L${next[0]} ${next[1]}`);
+        target.push(`M${innerPoint[0]} ${innerPoint[1]} L${innerNext[0]} ${innerNext[1]}`);
+      });
       const miters = outer.map((point, index) => `M${point[0]} ${point[1]} L${inner[index][0]} ${inner[index][1]}`);
       return `
         <g class="sash-profile-frame">
@@ -7931,11 +8165,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	      const handleY = handlePositionY(cell, item, scale);
 	      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
 	      const symbolItem = { x: left, y: top, w: width, h: height };
-	      const symbolInset = Math.max(4, sashFace * 0.78);
-	      const shapedSash = Array.isArray(shapedPoints) && shapedPoints.length >= 3;
-	      const glass = shapedSash
-	        ? `<polygon class="sash-profile-glass" points="${insetPolygonTowardCentroid(shapedPoints, Math.max(4, sashFace * 0.82)).map(point => point.join(",")).join(" ")}" fill="${glassFill}" />`
-	        : `<rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />`;
+      const symbolInset = Math.max(4, sashFace * 0.78);
+      const shapedSash = Array.isArray(shapedPoints) && shapedPoints.length >= 3;
+      const glass = shapedSash
+        ? `<polygon class="sash-profile-glass" points="${offsetPolygonPoints(shapedPoints, sashFace).map(point => point.join(",")).join(" ")}" fill="${glassFill}" />`
+        : `<rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />`;
 	      const profile = shapedSash
 	        ? renderSashProfilePolygon(shapedPoints, sashFace, frameColor, outlineColor)
 	        : renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor);
@@ -7990,7 +8224,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       } = sideHungSashGeometry(cell, item, scale);
       const shapedSash = Array.isArray(item.shapePoints) && item.shapePoints.length >= 3;
       const inner = shapedSash
-        ? insetPolygonTowardCentroid(outer, Math.max(4, sashFace * 0.82))
+        ? offsetPolygonPoints(outer, sashFace)
         : openSashInnerPolygon(outer, sashFace);
       const symbolInset = Math.max(3, sashFace * 0.35);
       const hingePoint = [hingeX, hingeCenterY];
@@ -9254,7 +9488,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       if (shapeType === "custom_polygon") {
         const outer = normalizeShapePoints(win.shape.points).map(point => [x + point.x / 100 * w, y + point.y / 100 * h]);
-        const inner = insetPolygonTowardCentroid(outer, Math.min(face, w * 0.18, h * 0.18));
+        const inner = offsetPolygonPoints(outer, face);
         if (outer.length >= 3 && inner.length >= 3) return polygonFramePath(outer, inner);
       }
       return `M${x} ${y}h${w}v${h}h-${w}Z M${innerX} ${innerY}v${innerH}h${innerW}v-${innerH}Z`;
@@ -9352,6 +9586,32 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       ];
     }
 
+    function threeFrameOpeningPoints3d(win, width, height, face) {
+      if (isRectangularWindowShape(win)) {
+        const halfW = width / 2;
+        const halfH = height / 2;
+        return [
+          { x: -halfW + face, y: halfH - face },
+          { x: halfW - face, y: halfH - face },
+          { x: halfW - face, y: -halfH + face },
+          { x: -halfW + face, y: -halfH + face }
+        ];
+      }
+      const outer = windowShapePoints3d(win, width, height);
+      const inner = offsetThreePolygon(outer, face);
+      if (inner.length >= 3) return cleanThreePolygonPoints(inner);
+      const fallback = insetPolygonTowardCentroid(outer.map(point => [point.x, point.y]), face);
+      return cleanThreePolygonPoints(fallback.map(([x, y]) => ({ x, y })));
+    }
+
+    function threeScaledMm(modelScale, mm) {
+      return Math.max(0, Number(mm) || 0) * Math.max(0.000001, Number(modelScale) || 0.001);
+    }
+
+    function threeRectMm(rect, mm) {
+      return threeScaledMm(rect?.modelScale, mm);
+    }
+
 	    function isRectangularWindowShape(win) {
 	      return normalizeWindowShape(win.shape).type === "rectangular";
 	    }
@@ -9447,7 +9707,111 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return cleanThreePolygonPoints(clipped);
     }
 
+    function clipThreeSegmentToLine(a, b, c, d) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const ex = d.x - c.x;
+      const ey = d.y - c.y;
+      const denominator = dx * ey - dy * ex;
+      if (Math.abs(denominator) < 0.000001) return { ...b };
+      const t = ((c.x - a.x) * ey - (c.y - a.y) * ex) / denominator;
+      return { x: a.x + dx * t, y: a.y + dy * t };
+    }
+
+    function clipThreePolygonToConvexPolygon(points, clipPoints) {
+      const clip = cleanThreePolygonPoints(clipPoints);
+      let output = cleanThreePolygonPoints(points);
+      if (clip.length < 3 || output.length < 3) return output;
+      const clockwise = threePolygonSignedArea(clip) < 0;
+      const epsilon = 0.000001;
+      for (let index = 0; index < clip.length; index += 1) {
+        const edgeStart = clip[index];
+        const edgeEnd = clip[(index + 1) % clip.length];
+        const inside = point => {
+          const cross = (edgeEnd.x - edgeStart.x) * (point.y - edgeStart.y) - (edgeEnd.y - edgeStart.y) * (point.x - edgeStart.x);
+          return clockwise ? cross <= epsilon : cross >= -epsilon;
+        };
+        const input = output;
+        output = [];
+        for (let pointIndex = 0; pointIndex < input.length; pointIndex += 1) {
+          const current = input[pointIndex];
+          const previous = input[(pointIndex + input.length - 1) % input.length];
+          const currentInside = inside(current);
+          const previousInside = inside(previous);
+          if (currentInside) {
+            if (!previousInside) output.push(clipThreeSegmentToLine(previous, current, edgeStart, edgeEnd));
+            output.push(current);
+          } else if (previousInside) {
+            output.push(clipThreeSegmentToLine(previous, current, edgeStart, edgeEnd));
+          }
+        }
+        output = cleanThreePolygonPoints(output);
+        if (output.length < 3) return [];
+      }
+      return cleanThreePolygonPoints(output);
+    }
+
+    function threeAxisAlignedBoxForPolygon(points) {
+      const clean = cleanThreePolygonPoints(points);
+      if (clean.length !== 4) return null;
+      const epsilon = 0.000001;
+      const xs = dedupeSortedNumbers(clean.map(point => point.x), epsilon);
+      const ys = dedupeSortedNumbers(clean.map(point => point.y), epsilon);
+      if (xs.length !== 2 || ys.length !== 2) return null;
+      const [left, right] = xs;
+      const [bottom, top] = ys;
+      const corners = [
+        { x: left, y: bottom },
+        { x: right, y: bottom },
+        { x: right, y: top },
+        { x: left, y: top }
+      ];
+      const hasAllCorners = corners.every(corner => clean.some(point => (
+        Math.abs(point.x - corner.x) <= epsilon && Math.abs(point.y - corner.y) <= epsilon
+      )));
+      return hasAllCorners ? { left, right, bottom, top } : null;
+    }
+
+    function isThreePolygonConvex(points) {
+      const clean = cleanThreePolygonPoints(points);
+      if (clean.length < 4) return clean.length >= 3;
+      let sign = 0;
+      const epsilon = 0.000001;
+      for (let index = 0; index < clean.length; index += 1) {
+        const a = clean[index];
+        const b = clean[(index + 1) % clean.length];
+        const c = clean[(index + 2) % clean.length];
+        const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if (Math.abs(cross) <= epsilon) continue;
+        const nextSign = cross > 0 ? 1 : -1;
+        if (sign && nextSign !== sign) return false;
+        sign = nextSign;
+      }
+      return true;
+    }
+
+    function clipThreePolygonToSimplePolygonPieces(points, clipPoints) {
+      const subject = cleanThreePolygonPoints(points);
+      const clip = cleanThreePolygonPoints(clipPoints);
+      if (subject.length < 3 || clip.length < 3) return [];
+      const subjectBox = threeAxisAlignedBoxForPolygon(subject);
+      if (subjectBox) {
+        const clipped = clipThreePolygonToBox(clip, subjectBox.left, subjectBox.right, subjectBox.bottom, subjectBox.top);
+        return clipped.length >= 3 ? [clipped] : [];
+      }
+      if (isThreePolygonConvex(clip)) {
+        const clipped = clipThreePolygonToConvexPolygon(subject, clip);
+        return clipped.length >= 3 ? [clipped] : [];
+      }
+      return [];
+    }
+
     function threePolygonArea(points) {
+      if (!Array.isArray(points) || points.length < 3) return 0;
+      return Math.abs(threePolygonSignedArea(points));
+    }
+
+    function threePolygonSignedArea(points) {
       if (!Array.isArray(points) || points.length < 3) return 0;
       let area = 0;
       for (let index = 0; index < points.length; index += 1) {
@@ -9455,7 +9819,64 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const next = points[(index + 1) % points.length];
         area += current.x * next.y - next.x * current.y;
       }
-      return Math.abs(area) / 2;
+      return area / 2;
+    }
+
+    function threeLineIntersection2d(lineA, lineB) {
+      const cross = lineA.direction.x * lineB.direction.y - lineA.direction.y * lineB.direction.x;
+      if (Math.abs(cross) < 0.000001) return null;
+      const dx = lineB.point.x - lineA.point.x;
+      const dy = lineB.point.y - lineA.point.y;
+      const t = (dx * lineB.direction.y - dy * lineB.direction.x) / cross;
+      return {
+        x: lineA.point.x + lineA.direction.x * t,
+        y: lineA.point.y + lineA.direction.y * t
+      };
+    }
+
+    function offsetThreePolygon(points, inset) {
+      const polygon = cleanThreePolygonPoints(points);
+      if (polygon.length < 3 || Math.abs(inset) < 0.000001) return polygon;
+      const signedArea = threePolygonSignedArea(polygon);
+      if (Math.abs(signedArea) < 0.000001) return polygon;
+      const clockwise = signedArea < 0;
+      const lines = [];
+      for (let index = 0; index < polygon.length; index += 1) {
+        const start = polygon[index];
+        const end = polygon[(index + 1) % polygon.length];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 0.000001) continue;
+        const normal = clockwise
+          ? { x: dy / length, y: -dx / length }
+          : { x: -dy / length, y: dx / length };
+        lines.push({
+          point: {
+            x: start.x + normal.x * inset,
+            y: start.y + normal.y * inset
+          },
+          direction: { x: dx, y: dy },
+          normal
+        });
+      }
+      if (lines.length !== polygon.length) return polygon;
+      const result = [];
+      for (let index = 0; index < polygon.length; index += 1) {
+        const previous = lines[(index + lines.length - 1) % lines.length];
+        const current = lines[index];
+        const intersection = threeLineIntersection2d(previous, current);
+        if (intersection) {
+          result.push(intersection);
+        } else {
+          const source = polygon[index];
+          result.push({
+            x: source.x + (previous.normal.x + current.normal.x) * inset / 2,
+            y: source.y + (previous.normal.y + current.normal.y) * inset / 2
+          });
+        }
+      }
+      return cleanThreePolygonPoints(result);
     }
 
     function threeClipIsFullBox(points, left, right, bottom, top) {
@@ -9907,9 +10328,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       diyShapeEditor.editingShapeId = String(options.shapeId || "");
       setValue("diyShapeName", options.name || "");
       const title = document.getElementById("diyShapeDialogTitle");
-      if (title) title.textContent = diyShapeEditor.editingShapeId ? "编辑DIY异形构件" : "DIY异形框绘制";
+      if (title) title.textContent = diyShapeEditor.editingShapeId ? "编辑DIY异形窗框" : "DIY异形框绘制";
       const saveButton = document.getElementById("btnSaveDiyShape");
-      if (saveButton) saveButton.textContent = diyShapeEditor.editingShapeId ? "保存修改" : "保存为窗型元素";
+      if (saveButton) saveButton.textContent = diyShapeEditor.editingShapeId ? "保存窗框" : "保存为DIY窗框";
       renderDiyShapeEditor();
       const dialog = document.getElementById("diyShapeDialog");
       if (dialog?.showModal && !dialog.open) dialog.showModal();
@@ -10114,7 +10535,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       closeDiyShapeEditor();
       markDirty();
-      showToast(editingIndex >= 0 ? `DIY异形构件“${name}”已更新。` : `DIY窗型“${name}”已保存到工具库。`);
+      showToast(editingIndex >= 0 ? `DIY异形窗框“${name}”已更新。` : `DIY窗框“${name}”已保存到工具库。`);
     }
 
     function outwardLabelVector(point, centroid, distance) {
@@ -10541,7 +10962,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const innerH = Math.max(0.1, height - face * 2);
       const mats = threeMaterials(win, series, scale);
       const colEdges = rectsToEdges(win.layout.columns, -innerW / 2, innerW);
-      const rowEdges = rectsToEdges(win.layout.rows, -innerH / 2, innerH);
+      const rowEdges = rectsToEdges([...win.layout.rows].reverse(), -innerH / 2, innerH);
       const cornerMount = resolveThreeCornerMount(win, width, colEdges, face);
       const wallHost = new THREE.Group();
       wallHost.userData.mountType = "wall-host";
@@ -10569,7 +10990,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
 	      const cols = win.layout.columns.length;
 	      const rows = win.layout.rows.length;
-	      const windowShapeClip = isRectangularWindowShape(win) ? null : windowShapePoints3d(win, innerW, innerH);
+	      const windowShapeClip = isRectangularWindowShape(win) ? null : threeFrameOpeningPoints3d(win, width, height, face);
 	      for (let r = 0; r < rows; r += 1) {
 	        for (let c = 0; c < cols; c += 1) {
           const left = colEdges[c];
@@ -10580,8 +11001,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           const cellRect = {
             x: (left + right) / 2,
             y: (bottom + top) / 2,
-            w: Math.max(0.02, right - left - face * 0.03),
-            h: Math.max(0.02, top - bottom - face * 0.03)
+            w: Math.max(0.02, right - left),
+            h: Math.max(0.02, top - bottom)
           };
           const cellBox = {
             row: r,
@@ -10602,6 +11023,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	            face,
 	            depth,
 	            shapeData: clipped.shapeData,
+            frameOuterPoints: windowShapeClip ? windowShapePoints3d(win, width, height) : null,
+            frameOpeningPoints: windowShapeClip,
 	            cornerMount: cornerMount && cell?.type === "corner_slide" ? cornerMount : null
 	          }, mats, { row: r, col: c, rows, cols, windowId: win.windowId, windowMark: win.mark });
         }
@@ -10716,27 +11139,138 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const memberZ = 0;
+      const frameOuter = windowShapePoints3d(win, innerW + face * 2, innerH + face * 2);
+      const frameOpening = threeFrameOpeningPoints3d(win, innerW + face * 2, innerH + face * 2, face);
+      const memberJoin = threeScaledMm((innerW + face * 2) / Math.max(1, win.widthMm), THREE_FRAME_MEMBER_JOIN_MM);
+      const memberOverlap = Math.max(memberJoin, face * 0.55);
+      const shapedFrame = !isRectangularWindowShape(win);
       for (let col = 1; col < colEdges.length - 1; col += 1) {
+        const x = colEdges[col];
+        const innerRange = threePolygonLineRange(frameOpening, "vertical", x);
+        const outerRange = threePolygonLineRange(frameOuter, "vertical", x);
         for (let row = 0; row < rows; row += 1) {
           if (cellHasCustomShape(win, row, col - 1) || cellHasCustomShape(win, row, col)) continue;
           const bottom = rowEdges[rows - row - 1];
           const top = rowEdges[rows - row];
-          addBox(parent, colEdges[col], (bottom + top) / 2, memberZ, face * 0.82, top - bottom, depth * 0.92, mats.profile);
+          if (shapedFrame) {
+            const joinedBottom = bottom - (row === rows - 1 ? face : memberOverlap);
+            const joinedTop = top + (row === 0 ? face : memberOverlap);
+            const strip = [
+              { x: x - face / 2, y: joinedBottom },
+              { x: x + face / 2, y: joinedBottom },
+              { x: x + face / 2, y: joinedTop },
+              { x: x - face / 2, y: joinedTop }
+            ];
+            clipThreePolygonToSimplePolygonPieces(strip, frameOuter).forEach(clipped => {
+              addThreeProfilePolygon(parent, clipped, depth, mats.profile, "through-mullion-clipped", depth * 0.018);
+            });
+            continue;
+          }
+          const memberBottom = innerRange ? Math.max(bottom, innerRange.start) : bottom;
+          const memberTop = innerRange ? Math.min(top, innerRange.end) : top;
+          const joinedBottom = row === rows - 1 && innerRange && outerRange
+            ? Math.max(outerRange.start, memberBottom - memberJoin)
+            : memberBottom;
+          const joinedTop = row === 0 && innerRange && outerRange
+            ? Math.min(outerRange.end, memberTop + memberJoin)
+            : memberTop;
+          if (joinedTop > joinedBottom) addBox(parent, x, (joinedBottom + joinedTop) / 2, memberZ, face, joinedTop - joinedBottom, depth, mats.profile);
         }
       }
       for (let edge = 1; edge < rowEdges.length - 1; edge += 1) {
         const aboveRow = rows - edge - 1;
         const belowRow = rows - edge;
+        const y = rowEdges[edge];
+        const innerRange = threePolygonLineRange(frameOpening, "horizontal", y);
+        const outerRange = threePolygonLineRange(frameOuter, "horizontal", y);
         for (let col = 0; col < cols; col += 1) {
           if (cellHasCustomShape(win, aboveRow, col) || cellHasCustomShape(win, belowRow, col)) continue;
-          addBox(parent, (colEdges[col] + colEdges[col + 1]) / 2, rowEdges[edge], memberZ, colEdges[col + 1] - colEdges[col], face * 0.82, depth * 0.92, mats.profile);
+          const rawLeft = colEdges[col];
+          const rawRight = colEdges[col + 1];
+          if (shapedFrame) {
+            const joinedLeft = rawLeft - (col === 0 ? face : memberOverlap);
+            const joinedRight = rawRight + (col === cols - 1 ? face : memberOverlap);
+            const strip = [
+              { x: joinedLeft, y: y - face / 2 },
+              { x: joinedRight, y: y - face / 2 },
+              { x: joinedRight, y: y + face / 2 },
+              { x: joinedLeft, y: y + face / 2 }
+            ];
+            clipThreePolygonToSimplePolygonPieces(strip, frameOuter).forEach(clipped => {
+              addThreeProfilePolygon(parent, clipped, depth, mats.profile, "through-mullion-clipped", depth * 0.018);
+            });
+            continue;
+          }
+          const innerLeft = innerRange ? Math.max(rawLeft, innerRange.start) : rawLeft;
+          const innerRight = innerRange ? Math.min(rawRight, innerRange.end) : rawRight;
+          const left = col === 0 && innerRange && outerRange
+            ? Math.max(outerRange.start, innerLeft - memberJoin)
+            : innerLeft;
+          const right = col === cols - 1 && innerRange && outerRange
+            ? Math.min(outerRange.end, innerRight + memberJoin)
+            : innerRight;
+          if (right > left) addBox(parent, (left + right) / 2, y, memberZ, right - left, face, depth, mats.profile);
         }
       }
     }
 
-    function addThreeShapeFrame(parent, points, face, depth, material) {
+    function addThreeShapeFrame(parent, points, face, depth, material, options = {}) {
+      const THREE = threeLib;
+      const outerPoints = cleanThreePolygonPoints(points);
+      if (!THREE || outerPoints.length < 3) return;
+      if (options.solid === false) {
+        addThreeShapeRailFrame(parent, outerPoints, face, depth, material);
+        return;
+      }
+      const outer = outerPoints.map(point => new THREE.Vector2(point.x, point.y));
+      const innerInset = Number.isFinite(Number(options.innerInset)) ? Math.max(0, Number(options.innerInset)) : face;
+      const innerPoints = offsetThreePolygon(outerPoints, innerInset);
+      if (innerPoints.length < 3) {
+        addThreeShapeRailFrame(parent, outerPoints, face, depth, material);
+        return;
+      }
+      const inner = innerPoints.map(point => new THREE.Vector2(point.x, point.y));
+      const outerClockwise = THREE.ShapeUtils.isClockWise(outer);
+      const hole = THREE.ShapeUtils.isClockWise(inner) === outerClockwise ? inner.reverse() : inner;
+      const shape = new THREE.Shape(outerClockwise ? outer : outer.reverse());
+      const innerPath = new THREE.Path(hole);
+      shape.holes.push(innerPath);
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth,
+        bevelEnabled: false,
+        steps: 1
+      });
+      geometry.translate(0, 0, -depth / 2);
+      const frame = new THREE.Mesh(geometry, material);
+      frame.userData.mountType = "shape-frame-solid";
+      parent.add(frame);
+    }
+
+    function addThreeProfilePolygon(parent, points, depth, material, mountType = "profile-polygon", zOffset = 0) {
+      const THREE = threeLib;
+      const clean = cleanThreePolygonPoints(points);
+      if (!THREE || clean.length < 3) return null;
+      const vectors = clean.map(point => new THREE.Vector2(point.x, point.y));
+      const oriented = THREE.ShapeUtils.isClockWise(vectors) ? vectors.reverse() : vectors;
+      const shape = new THREE.Shape(oriented);
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth,
+        bevelEnabled: false,
+        steps: 1
+      });
+      geometry.translate(0, 0, -depth / 2);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.z = zOffset;
+      mesh.renderOrder = zOffset > 0 ? 12 : 10;
+      mesh.userData.mountType = mountType;
+      mesh.userData.profileZOffset = zOffset;
+      parent.add(mesh);
+      return mesh;
+    }
+
+    function addThreeShapeRailFrame(parent, points, face, depth, material) {
       if (!Array.isArray(points) || points.length < 3) return;
-      const railWidth = Math.max(0.012, face * 0.82);
+      const railWidth = Math.max(0.012, face);
       for (let index = 0; index < points.length; index += 1) {
         const start = points[index];
         const end = points[(index + 1) % points.length];
@@ -10748,6 +11282,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         rail.rotation.z = Math.atan2(dy, dx);
         rail.userData.mountType = "shape-frame-rail";
       }
+      points.forEach(point => {
+        const cap = addBox(parent, point.x, point.y, 0, railWidth, railWidth, depth, material);
+        cap.userData.mountType = "shape-frame-joint-cap";
+      });
     }
 
     function addThreeTopologyMembers(parent, win, colEdges, rowEdges, face, depth, mats) {
@@ -10756,7 +11294,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const memberZ = 0;
       const innerW = Math.max(0.001, colEdges[colEdges.length - 1] - colEdges[0]);
       const innerH = Math.max(0.001, rowEdges[rowEdges.length - 1] - rowEdges[0]);
-      const windowShapePoints = isRectangularWindowShape(win) ? null : windowShapePoints3d(win, innerW, innerH);
+      const frameW = innerW + face * 2;
+      const frameH = innerH + face * 2;
+      const windowShapePoints = isRectangularWindowShape(win) ? null : threeFrameOpeningPoints3d(win, frameW, frameH, face);
+      const windowOuterPoints = isRectangularWindowShape(win) ? null : windowShapePoints3d(win, frameW, frameH);
+      const modelScale = (innerW + face * 2) / Math.max(1, Number(win.widthMm) || 1);
+      const connectorOverlap = threeScaledMm(modelScale, THREE_FRAME_MEMBER_JOIN_MM);
+      const memberOverlap = Math.max(connectorOverlap, face * 0.55);
       for (const member of win.topology?.members || []) {
         const host = findMemberHost(win.layout, member);
         if (!host) continue;
@@ -10767,25 +11311,52 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const cellWidth = right - left;
         const cellHeight = top - bottom;
         const shapePoints = threeCellShapeWorldPoints(win, host, left, right, bottom, top, windowShapePoints);
-        const connectorGap = shapePoints ? Math.max(0.0015, face * 0.018) : 0;
+        const memberConnectorOverlap = shapePoints ? memberOverlap : 0;
+        const memberClipPoints = shapePoints ? (windowOuterPoints || shapePoints) : null;
+        const startsAtBoundary = Number(member.span?.startRatio || 0) <= 0.001;
+        const endsAtBoundary = Number(member.span?.endRatio || 0) >= 0.999;
         if (member.orientation === "horizontal") {
           const y = top - cellHeight * member.positionRatio;
           const range = threePolygonLineRange(shapePoints, "horizontal", y);
           const chordStart = range ? range.start : left;
           const chordEnd = range ? range.end : right;
           const chordLength = Math.max(0, chordEnd - chordStart);
-          const startX = chordStart + chordLength * member.span.startRatio + Math.min(connectorGap, chordLength * 0.08);
-          const endX = chordStart + chordLength * member.span.endRatio - Math.min(connectorGap, chordLength * 0.08);
-          if (endX > startX) addBox(parent, (startX + endX) / 2, y, memberZ, endX - startX, face * 0.82, depth * 0.92, mats.profile);
+          const startX = chordStart + chordLength * member.span.startRatio - (startsAtBoundary ? memberConnectorOverlap : 0);
+          const endX = chordStart + chordLength * member.span.endRatio + (endsAtBoundary ? memberConnectorOverlap : 0);
+          if (shapePoints) {
+            const strip = [
+              { x: startX, y: y - face / 2 },
+              { x: endX, y: y - face / 2 },
+              { x: endX, y: y + face / 2 },
+              { x: startX, y: y + face / 2 }
+            ];
+            clipThreePolygonToSimplePolygonPieces(strip, memberClipPoints).forEach(clipped => {
+              addThreeProfilePolygon(parent, clipped, depth, mats.profile, "local-mullion-clipped", depth * 0.026);
+            });
+            continue;
+          }
+          if (endX > startX) addBox(parent, (startX + endX) / 2, y, memberZ, endX - startX, face, depth, mats.profile);
         } else {
           const x = left + cellWidth * member.positionRatio;
           const range = threePolygonLineRange(shapePoints, "vertical", x);
           const chordTop = range ? range.end : top;
           const chordBottom = range ? range.start : bottom;
           const chordLength = Math.max(0, chordTop - chordBottom);
-          const startY = chordTop - chordLength * member.span.startRatio - Math.min(connectorGap, chordLength * 0.08);
-          const endY = chordTop - chordLength * member.span.endRatio + Math.min(connectorGap, chordLength * 0.08);
-          if (startY > endY) addBox(parent, x, (startY + endY) / 2, memberZ, face * 0.82, startY - endY, depth * 0.92, mats.profile);
+          const startY = chordTop - chordLength * member.span.startRatio + (startsAtBoundary ? memberConnectorOverlap : 0);
+          const endY = chordTop - chordLength * member.span.endRatio - (endsAtBoundary ? memberConnectorOverlap : 0);
+          if (shapePoints) {
+            const strip = [
+              { x: x - face / 2, y: startY },
+              { x: x + face / 2, y: startY },
+              { x: x + face / 2, y: endY },
+              { x: x - face / 2, y: endY }
+            ];
+            clipThreePolygonToSimplePolygonPieces(strip, memberClipPoints).forEach(clipped => {
+              addThreeProfilePolygon(parent, clipped, depth, mats.profile, "local-mullion-clipped", depth * 0.026);
+            });
+            continue;
+          }
+          if (startY > endY) addBox(parent, x, (startY + endY) / 2, memberZ, face, startY - endY, depth, mats.profile);
         }
       }
     }
@@ -11291,7 +11862,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	        addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
 	        return;
 	      }
-	      if (shapeData) addThreeCustomCellGeometry(parent, cell, rect, mats);
+	      if (shapeData) {
+	        if (shapeData.frameShape) addThreeShapeGlassPane(parent, shapeData, rect, mats);
+	        else addThreeCustomCellGeometry(parent, cell, rect, mats);
+	      }
       if (cell.type === "panel") {
         addThreePanelInfill(parent, cell, rect, mats);
         return;
@@ -11397,7 +11971,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
         return;
       }
-	      if (!shapeData) addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
+	      if (!shapeData) {
+	        const glassOverlap = threeRectMm(rect, THREE_GLASS_REBATE_OVERLAP_MM);
+	        addPane(parent, rect.x, rect.y, 0.02, rect.w + glassOverlap * 2, rect.h + glassOverlap * 2, mats.glass);
+	      }
 	      addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
 	    }
 
@@ -11451,13 +12028,48 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	      } : null;
 	    }
 
-	    function addThreeCustomCellGeometry(parent, cell, rect, mats) {
-	      const shapeData = threeCellShapeData(cell, rect);
-	      if (!shapeData || !threeLib) return;
+    function addThreeCustomCellGeometry(parent, cell, rect, mats) {
+      const shapeData = threeCellShapeData(cell, rect);
+      if (!shapeData || !threeLib) return;
       const group = new threeLib.Group();
       group.position.set(rect.x, rect.y, 0.03);
       addThreeCustomShapeBody(group, shapeData, rect.w * 0.92, rect.h * 0.92, rect.face * 0.26, rect.depth * 0.5, mats);
       parent.add(group);
+    }
+
+    function addThreeShapeGlassPane(parent, shapeData, rect, mats) {
+      if (!shapeData?.points?.length || !threeLib) return;
+      const width = rect.w;
+      const height = rect.h;
+      const basePoints = shapeData.points.map(point => ({
+        x: rect.x - width / 2 + point.x / 100 * width,
+        y: rect.y + height / 2 - point.y / 100 * height
+      }));
+      const glassOverlap = threeRectMm(rect, THREE_GLASS_REBATE_OVERLAP_MM);
+      const insetPoints = offsetThreePolygon(basePoints, -glassOverlap);
+      const expandedPoints = insetPoints.length >= 3 ? insetPoints : basePoints;
+      const clippedPieces = rect.frameOuterPoints?.length >= 3
+        ? clipThreePolygonToSimplePolygonPieces(expandedPoints, rect.frameOuterPoints)
+        : [];
+      const glassPieces = clippedPieces.length ? clippedPieces : [expandedPoints];
+      glassPieces.forEach(piece => {
+        const points = cleanThreePolygonPoints(piece).map(point => ({
+          x: point.x - rect.x,
+          y: point.y - rect.y
+        }));
+        if (points.length < 3) return;
+        const shape = new threeLib.Shape();
+        points.forEach((point, index) => {
+          if (index === 0) shape.moveTo(point.x, point.y);
+          else shape.lineTo(point.x, point.y);
+        });
+        shape.closePath();
+        const glass = new threeLib.Mesh(new threeLib.ShapeGeometry(shape), mats.glass);
+        glass.position.set(rect.x, rect.y, 0.02);
+        glass.renderOrder = 4;
+        glass.userData.mountType = "fixed-shaped-glass";
+        parent.add(glass);
+      });
     }
 
 	    function addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly) {
@@ -11541,6 +12153,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         row: meta.row,
         col: meta.col,
         object: openableObject,
+        selectionObject: sash,
         type: cell.type,
         motionType,
         panelLabel: `${shapeData.name} · ${assembly.panels[0]?.label || "异形扇"}`,
@@ -12747,8 +13360,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const width = Number(part.shapeWidth || part.width);
       const height = Number(part.shapeHeight || part.height);
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+      const shapeObject = part.selectionObject || part.object;
+      if (!shapeObject) return null;
       root.updateMatrixWorld(true);
-      part.object.updateMatrixWorld(true);
+      shapeObject.updateMatrixWorld(true);
       const vertices = [];
       const points = part.shapePoints.map(point => new THREE.Vector3(
         -width / 2 + point.x / 100 * width,
@@ -12756,8 +13371,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         0.115
       ));
       for (let index = 0; index < points.length; index += 1) {
-        const start = points[index].clone().applyMatrix4(part.object.matrixWorld);
-        const end = points[(index + 1) % points.length].clone().applyMatrix4(part.object.matrixWorld);
+        const start = points[index].clone().applyMatrix4(shapeObject.matrixWorld);
+        const end = points[(index + 1) % points.length].clone().applyMatrix4(shapeObject.matrixWorld);
         root.worldToLocal(start);
         root.worldToLocal(end);
         vertices.push(start.x, start.y, start.z, end.x, end.y, end.z);
