@@ -215,6 +215,11 @@
         "installation": { "$ref": "#/$defs/installation" },
         "shape": { "$ref": "#/$defs/shape" },
         "layout": { "$ref": "#/$defs/layoutGrid" },
+        "markups": {
+          "type": "array",
+          "description": "绑定在整樘窗根节点上的文字标注，可跨窗格自由移动。",
+          "items": { "$ref": "#/$defs/windowMarkup" }
+        },
         "notes": { "type": "string" }
       },
       "additionalProperties": true
@@ -228,6 +233,7 @@
           "enum": ["rectangular", "arched", "trapezoid", "round", "polygon"]
         },
         "archHeightMm": { "type": "number", "minimum": 0 },
+        "shapeAngleDeg": { "type": "number", "minimum": 0, "maximum": 180 },
         "polygonPoints": {
           "type": "array",
           "items": {
@@ -302,6 +308,25 @@
       },
       "additionalProperties": true
     },
+    "windowMarkup": {
+      "type": "object",
+      "required": ["markupId", "kind", "hostType", "hostWindowId", "xPercent", "yPercent"],
+      "properties": {
+        "markupId": { "type": "string" },
+        "kind": { "type": "string", "const": "text" },
+        "text": { "type": "string" },
+        "sizeMm": { "type": "number", "minimum": 0, "maximum": 300 },
+        "hostType": { "type": "string", "const": "window" },
+        "hostWindowId": { "type": "string" },
+        "hostCellId": { "type": "string", "const": "" },
+        "xPercent": { "type": "number", "minimum": -100, "maximum": 200 },
+        "yPercent": { "type": "number", "minimum": -100, "maximum": 200 },
+        "offsetXPercent": { "type": "number", "minimum": -200, "maximum": 200 },
+        "offsetYPercent": { "type": "number", "minimum": -200, "maximum": 200 },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "openingAssembly": {
       "type": "object",
       "description": "组合开启构件的生产语义。opening描述基本方向，本对象描述扇数、活动扇、轨道、主从顺序、收口和配套纱窗。",
@@ -352,6 +377,7 @@
           "enum": ["post", "postless"]
         },
         "pocketDepthMm": { "type": "integer", "minimum": 0, "maximum": 4000 },
+        "openPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "panels": {
           "type": "array",
           "minItems": 1,

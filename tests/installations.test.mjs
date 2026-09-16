@@ -140,6 +140,7 @@ const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8"
 [
   "btnConfigureSurround",
   "inspector-installation",
+  "installationSillHeight",
   "surroundEnabled",
   "installationMountingMode",
   "installationFrameAlignment",
@@ -153,6 +154,8 @@ const html = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8"
 ].forEach(id => assert.ok(html.includes(`id="${id}"`), `${id} should be available in the installation workbench`));
 
 const app = readFileSync(new URL("../dist/assets/app.js", import.meta.url), "utf8");
+assert.ok(html.includes("台高 mm"), "Sill height should remain visible with the 台高 label.");
+assert.ok(app.includes("win.installation.sillHeightMm = sillHeightMm") && app.includes('setValue("sillHeight", sillHeightMm)') && app.includes('setValue("installationSillHeight", win.installation?.sillHeightMm || 0)'), "Window and installation sill-height controls should stay synchronized.");
 assert.ok(app.includes("function updatePreviewGround(groundY = 0)"), "3D ground should use an explicit finished-floor datum");
 assert.ok(!app.includes("const groundY = bounds.min.y - 0.025"), "3D ground must not move with the lowest generated mesh");
 assert.ok(app.includes('wallHost.userData.mountType = "wall-host"'), "3D windows should be mounted under a wall host");

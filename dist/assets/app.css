@@ -1008,6 +1008,19 @@
       background: #fff7f5;
     }
 
+    .toolbar-action:disabled {
+      cursor: not-allowed;
+      opacity: 0.46;
+      background: #f6f9fc;
+      color: #7f91a3;
+    }
+
+    .toolbar-action:disabled .button-icon {
+      color: #8ea0b2;
+      background: #eef3f8;
+      border-color: #dce6ef;
+    }
+
     .drawing-mode-switch {
       display: inline-grid;
       grid-template-columns: repeat(2, minmax(54px, 1fr));
@@ -1235,9 +1248,13 @@
 
     .cell-markup {
       cursor: move;
-      pointer-events: auto;
+      pointer-events: all;
       user-select: none;
       -webkit-user-select: none;
+    }
+
+    .cell-markup * {
+      pointer-events: all;
     }
 
     .cell-markup.active .cell-markup-text-box,
@@ -1311,6 +1328,12 @@
       color: #1677ff;
     }
 
+    .geometry-drag-hit {
+      fill: transparent;
+      stroke: transparent;
+      pointer-events: all;
+    }
+
     .geometry-drag-handle line {
       stroke: transparent;
       stroke-width: 14;
@@ -1327,8 +1350,20 @@
 
     .geometry-drag-handle:hover circle,
     .geometry-drag-handle:focus circle,
+    .geometry-drag-handle.selected circle,
     .assembly-window.selected .geometry-drag-handle circle {
       opacity: 1;
+    }
+
+    .geometry-drag-handle.selected line {
+      stroke: rgba(22, 119, 255, 0.72);
+      stroke-width: 3;
+    }
+
+    .geometry-drag-handle.selected circle {
+      fill: #1677ff;
+      stroke: #fff;
+      stroke-width: 2.5;
     }
 
     .window-width-handle,
@@ -1566,6 +1601,110 @@
       pointer-events: none;
     }
 
+    .window-frame-occlusion,
+    .assembly-window-frame-occlusion,
+    .open-sash-foreground-layer {
+      pointer-events: none;
+    }
+
+    .closed-sash-elevation {
+      pointer-events: none;
+    }
+
+    .open-sash-closed-footprint {
+      fill: none;
+      stroke: rgba(245, 158, 11, 0.9);
+      stroke-width: 1.8;
+      stroke-dasharray: 7 5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .open-sash-hinge-channel {
+      fill: rgba(225, 233, 235, 0.94);
+      stroke: rgba(38, 57, 62, 0.72);
+      stroke-width: 1.15;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .open-sash-side-face {
+      opacity: 0.42;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .open-sash-profile-band {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .open-sash-profile-band-free {
+      stroke-width: 1.9;
+    }
+
+    .open-sash-glass {
+      opacity: 0.92;
+    }
+
+    .open-sash-pocket-guide {
+      fill: rgba(126, 135, 146, 0.16);
+      stroke: #7e8792;
+      stroke-width: 1.4;
+      stroke-dasharray: 6 4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-mechanism-link {
+      fill: none;
+      stroke: #7b8e96;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-profile-frame {
+      pointer-events: none;
+    }
+
+    .sash-profile-body {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-profile-glass {
+      stroke: rgba(90, 116, 123, 0.38);
+      stroke-width: 0.8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-profile-handle {
+      stroke: #8a5a00;
+      stroke-width: 4;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-hinge-axis {
+      stroke: #1f3338;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sash-hinge-plate {
+      fill: #1f3338;
+      stroke: rgba(255, 255, 255, 0.56);
+      stroke-width: 0.65;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .opening-symbol-line {
+      fill: none;
+      stroke: #20383e;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
     .opening-direction-label {
       fill: #173bc1;
       font-size: 10px;
@@ -1664,6 +1803,14 @@
       cursor: pointer;
     }
 
+    .topology-member[data-member-orientation="vertical"] {
+      cursor: ew-resize;
+    }
+
+    .topology-member[data-member-orientation="horizontal"] {
+      cursor: ns-resize;
+    }
+
     .topology-member-hit {
       fill: transparent;
       stroke: transparent;
@@ -1671,8 +1818,6 @@
     }
 
     .topology-member-profile {
-      fill: var(--profile);
-      stroke: var(--profile-dark);
       stroke-width: 1.5;
       vector-effect: non-scaling-stroke;
     }
@@ -1683,8 +1828,22 @@
       stroke-width: 3;
     }
 
+    .topology-member-drag-dot {
+      fill: #fff;
+      stroke: #1677ff;
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .topology-member:hover .topology-member-drag-dot,
+    .topology-member.selected .topology-member-drag-dot {
+      opacity: 1;
+    }
+
     .topology-member-label {
-      fill: #075bd8;
+      fill: #173136;
       font-size: 11px;
       font-weight: 700;
       text-anchor: middle;
@@ -3080,6 +3239,28 @@
       gap: 8px;
     }
 
+    .preview-view-presets {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .preview-view-presets button {
+      min-height: 34px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid #bfd0df;
+      background: #f8fbff;
+      color: var(--text);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .preview-view-presets button:hover {
+      border-color: #1677ff;
+      color: #0b5cc7;
+    }
+
     .preview-visibility label {
       display: flex;
       align-items: center;
@@ -3992,6 +4173,41 @@
     .position-right { grid-area: right; }
     .position-bottom { grid-area: bottom; }
     .position-free { grid-area: free; }
+
+    .shape-placement-actions {
+      padding: 22px 28px 28px;
+    }
+
+    .shape-placement-replace {
+      width: 100%;
+      min-height: 44px;
+      margin-bottom: 16px;
+      border-color: var(--primary);
+      background: #eff6ff;
+      color: var(--primary);
+      font-weight: 800;
+    }
+
+    .shape-placement-actions .position-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr 1fr;
+      grid-template-areas:
+        ". top ."
+        "left center right"
+        ". bottom .";
+      gap: 12px;
+      align-items: center;
+    }
+
+    .shape-placement-actions .position-grid button {
+      min-height: 46px;
+      border-radius: 6px;
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+    }
 
     .joint-settings-dialog {
       width: min(660px, calc(100vw - 36px));

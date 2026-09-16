@@ -16,7 +16,7 @@ import {
   openingAssemblySummary,
   openingLabel,
   openingOptionsForType
-} from "./openings.js?v=20260915-01";
+} from "./openings.js?v=20260915-04";
 import {
   createCellId,
   createMemberId,
@@ -82,6 +82,7 @@ const SHAPE_PRESETS = Object.freeze([
   { type: "custom_polygon", label: "DIY异形框", icon: "DIY", description: "按点位录入的自定义多边形外框" }
 ]);
 const SHAPE_PRESET_BY_TYPE = Object.freeze(Object.fromEntries(SHAPE_PRESETS.map(item => [item.type, item])));
+const ANGLED_WINDOW_SHAPE_TYPES = Object.freeze(["trapezoid", "trapezoid_left", "trapezoid_peak", "notch_top_left", "notch_top_right"]);
 const LEGACY_FILL_CELL_TYPES = Object.freeze(["screen", "louver", "grille", "panel"]);
 const INFILL_TYPES = Object.freeze(["glass", "panel", "louver"]);
 const PANEL_MODES = Object.freeze(["single", "double"]);
@@ -99,10 +100,18 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     let selectedCell = { row: 0, col: 0 };
     let selectedMemberId = "";
     let selectedJointId = "";
+    let selectedDivider = { windowId: "", axis: "", index: -1 };
     const collapsedObjectBranches = new Set();
     let selectedMarkupId = "";
     let selectedAssemblyId = initialAssembly?.assemblyId || "";
     let selectedPlacementId = "";
+    let editHistory = {
+      undo: [],
+      redo: [],
+      baseline: JSON.stringify(project),
+      max: 80,
+      restoring: false
+    };
     let drawingMode = project.assemblies?.some(assembly => assembly.placements?.length) ? "assembly" : "window";
     let activeLeftTab = "draw";
     let activeInspectorTab = "window";
@@ -118,9 +127,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     let measurementSourceProject = null;
     let jointPositionDialogMode = "joint";
     let pendingConnectedShapeType = "rectangular";
+    let pendingShapePlacementType = "rectangular";
     let canvasCommand = { mode: "", jointType: "", jointId: "", shapeType: "", cellPreset: "", cellOpening: "", cellPanels: "", cellTracks: "", panelMode: "", markupType: "" };
     let canvasViewport = { scale: 1, x: 0, y: 0 };
     let canvasPan = { active: false, pointerId: 0, startX: 0, startY: 0, originX: 0, originY: 0 };
+    let canvasRootMarkupFrames = [];
     let geometryDrag = null;
     let activeMarkupEditor = null;
     let bom = calculateProjectBom(project);
@@ -227,13 +238,14 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function createWindow(overrides = {}) {
       const idPart = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const windowId = overrides.windowId || `W-${idPart}`;
       const layout = normalizeLayout(overrides.layout || {
         columns: [1],
         rows: [1],
         cells: [{ type: "fixed_glass", opening: "left_in" }]
       });
       return {
-        windowId: overrides.windowId || `W-${idPart}`,
+        windowId,
         mark: overrides.mark || `C-${String(Date.now()).slice(-4)}`,
         name: overrides.name || "新门窗",
         embeddedInWindowId: overrides.embeddedInWindowId || "",
@@ -255,6 +267,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         geometryMode: overrides.geometryMode === "topology" || overrides.topology?.members?.length ? "topology" : "grid",
         layout,
         topology: normalizeTopology(overrides.topology, layout),
+        markups: normalizeWindowMarkups(overrides.markups).map(markup => ({
+          ...markup,
+          hostWindowId: windowId
+        })),
         orderInfo: normalizeWindowOrderInfo(overrides.orderInfo, overrides),
         notes: overrides.notes || ""
       };
@@ -275,6 +291,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       };
     }
 
+    function isAngledWindowShape(type) {
+      return ANGLED_WINDOW_SHAPE_TYPES.includes(type);
+    }
+
+    function clampShapeAngle(type, value) {
+      const fallback = defaultShapeAngle(type);
+      const number = Number(value);
+      const source = Number.isFinite(number) ? number : fallback;
+      if (type === "trapezoid" || type === "trapezoid_left") return Math.max(60, Math.min(88, Math.round(source)));
+      if (type === "trapezoid_peak") return Math.max(12, Math.min(55, Math.round(source)));
+      if (type === "notch_top_left" || type === "notch_top_right") return Math.max(20, Math.min(70, Math.round(source)));
+      return 0;
+    }
+
+    function defaultShapeAngle(type) {
+      if (type === "trapezoid" || type === "trapezoid_left") return 83;
+      if (type === "trapezoid_peak") return 34;
+      if (type === "notch_top_left" || type === "notch_top_right") return 45;
+      return 0;
+    }
+
     function normalizeWindowShape(value = {}) {
       const type = SHAPE_PRESET_BY_TYPE[value?.type] ? value.type : "rectangular";
       const defaultPoints = type === "custom_polygon"
@@ -283,6 +320,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return {
         type,
         archHeightMm: type === "arched" ? Math.max(120, Math.round(Number(value.archHeightMm) || 220)) : 0,
+        shapeAngleDeg: isAngledWindowShape(type) ? clampShapeAngle(type, value.shapeAngleDeg ?? value.angleDeg) : 0,
         points: type === "custom_polygon" ? normalizeShapePoints(value.points, defaultPoints) : []
       };
     }
@@ -437,6 +475,38 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return Array.isArray(value) ? value.map(normalizeCellMarkup).filter(Boolean) : [];
     }
 
+    function normalizeWindowMarkup(value = {}) {
+      if (value?.kind && value.kind !== "text") return null;
+      const xPercent = Math.max(-100, Math.min(200, Number(value.xPercent ?? value.xRatio ?? 50)));
+      const yPercent = Math.max(-100, Math.min(200, Number(value.yPercent ?? value.yRatio ?? 50)));
+      return {
+        markupId: String(value.markupId || createMarkupId()),
+        kind: "text",
+        text: String(value.text || "文字标注"),
+        xPercent,
+        yPercent,
+        offsetXPercent: Math.max(-200, Math.min(200, Number(value.offsetXPercent ?? xPercent - 50))),
+        offsetYPercent: Math.max(-200, Math.min(200, Number(value.offsetYPercent ?? yPercent - 50))),
+        sizeMm: 0,
+        hostType: "window",
+        hostWindowId: String(value.hostWindowId || ""),
+        hostCellId: "",
+        note: String(value.note || "")
+      };
+    }
+
+    function normalizeWindowMarkups(value) {
+      return Array.isArray(value) ? value.map(normalizeWindowMarkup).filter(Boolean) : [];
+    }
+
+    function createWindowMarkup(kind = "text", options = {}) {
+      return normalizeWindowMarkup({
+        kind: "text",
+        text: kind === "text" ? "文字标注" : "",
+        ...options
+      });
+    }
+
     function createCellMarkup(kind, options = {}) {
       return normalizeCellMarkup({
         kind,
@@ -444,6 +514,68 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sizeMm: kind === "text" ? 0 : (kind === "lock" ? 35 : 60),
         ...options
       });
+    }
+
+    const DEFAULT_LOCK_NOTE = "auto-default-lock";
+
+    function defaultLockPositionForCell(cell) {
+      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      const opening = String(cell.opening || "");
+      const point = { xPercent: 86, yPercent: 50 };
+      if (["turn", "turn_tilt", "door"].includes(cell.type)) {
+        const hingeSide = opening.startsWith("right")
+          ? "right"
+          : (opening.startsWith("left") ? "left" : (assembly.primarySide || "left"));
+        point.xPercent = hingeSide === "left" ? 86 : 14;
+      } else if (cell.type === "top_hung") {
+        point.xPercent = 50;
+        point.yPercent = 84;
+      } else if (cell.type === "bottom_hung") {
+        point.xPercent = 50;
+        point.yPercent = 16;
+      } else if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide", "corner_slide"].includes(cell.type)) {
+        point.xPercent = assembly.stackSide === "right" ? 64 : (assembly.stackSide === "both" ? 50 : 36);
+      } else if (cell.type === "vertical_slide") {
+        point.xPercent = 50;
+        point.yPercent = assembly.stackSide === "bottom" ? 34 : 66;
+      }
+      return {
+        ...point,
+        offsetXPercent: point.xPercent - 50,
+        offsetYPercent: point.yPercent - 50
+      };
+    }
+
+    function ensureDefaultLockMarkup(win, cell, options = {}) {
+      if (!cell || !isOperableType(cell.type)) return false;
+      cell.markups = normalizeCellMarkups(cell.markups).map(markup => ({
+        ...markup,
+        hostType: "cell",
+        hostWindowId: win?.windowId || markup.hostWindowId || "",
+        hostCellId: cell.cellId
+      }));
+      const existing = cell.markups.find(markup => markup.kind === "lock");
+      if (existing) {
+        existing.hostType = "cell";
+        existing.hostWindowId = win?.windowId || existing.hostWindowId || "";
+        existing.hostCellId = cell.cellId;
+        if (options.repositionExisting && existing.note === DEFAULT_LOCK_NOTE) {
+          Object.assign(existing, defaultLockPositionForCell(cell));
+        }
+        return false;
+      }
+      cell.markups.push(createCellMarkup("lock", {
+        ...defaultLockPositionForCell(cell),
+        hostWindowId: win?.windowId || "",
+        hostCellId: cell.cellId,
+        note: DEFAULT_LOCK_NOTE
+      }));
+      return true;
+    }
+
+    function removeDefaultLockMarkup(cell) {
+      if (!cell) return;
+      cell.markups = normalizeCellMarkups(cell.markups).filter(markup => !(markup.kind === "lock" && markup.note === DEFAULT_LOCK_NOTE));
     }
 
     function createCell(type = "fixed_glass", opening = "") {
@@ -572,16 +704,49 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           geometryMode: w.geometryMode === "topology" || w.topology?.members?.length ? "topology" : "grid",
           layout,
           topology: normalizeTopology(w.topology, layout),
+          markups: [],
           orderInfo: normalizeWindowOrderInfo(w.orderInfo, w)
         };
-        normalizedWindow.layout.cells.forEach(cell => {
-          cell.markups = normalizeCellMarkups(cell.markups).map(markup => ({
+        const rootMarkups = normalizeWindowMarkups(w.markups).map(markup => ({
+          ...markup,
+          hostType: "window",
+          hostWindowId: normalizedWindow.windowId,
+          hostCellId: ""
+        }));
+        const rootMarkupIds = new Set(rootMarkups.map(markup => markup.markupId));
+        const colTotal = sum(layout.columns);
+        const rowTotal = sum(layout.rows);
+        normalizedWindow.layout.cells.forEach((cell, index) => {
+          const row = Math.floor(index / layout.columns.length);
+          const col = index % layout.columns.length;
+          const colStart = sum(layout.columns.slice(0, col)) / Math.max(1, colTotal) * 100;
+          const rowStart = sum(layout.rows.slice(0, row)) / Math.max(1, rowTotal) * 100;
+          const colSpan = Number(layout.columns[col] || 0) / Math.max(1, colTotal) * 100;
+          const rowSpan = Number(layout.rows[row] || 0) / Math.max(1, rowTotal) * 100;
+          const normalizedMarkups = normalizeCellMarkups(cell.markups);
+          normalizedMarkups.filter(markup => markup.kind === "text").forEach(markup => {
+            if (rootMarkupIds.has(markup.markupId)) return;
+            const rootMarkup = normalizeWindowMarkup({
+              ...markup,
+              xPercent: colStart + colSpan * markup.xPercent / 100,
+              yPercent: rowStart + rowSpan * markup.yPercent / 100,
+              hostType: "window",
+              hostWindowId: normalizedWindow.windowId,
+              hostCellId: ""
+            });
+            if (rootMarkup) {
+              rootMarkups.push(rootMarkup);
+              rootMarkupIds.add(rootMarkup.markupId);
+            }
+          });
+          cell.markups = normalizedMarkups.filter(markup => markup.kind !== "text").map(markup => ({
             ...markup,
             hostType: "cell",
             hostWindowId: normalizedWindow.windowId,
             hostCellId: cell.cellId
           }));
         });
+        normalizedWindow.markups = rootMarkups;
         return normalizedWindow;
       });
       next.joints = normalizeEngineeringJoints(next.joints, next.windows);
@@ -902,6 +1067,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       saveCurrentProjectToLibrary({ toast: false, validate: false });
       project = createFreshProject(details);
       resetProjectSelection();
+      resetEditHistory();
       switchLeft("order");
       closeProjectCreateDialog();
       saveProject();
@@ -923,6 +1089,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       project = migrateLegacyProjectToCanvasModel(record.design);
       projectManagerSelectedId = project.project.projectId;
       resetProjectSelection();
+      resetEditHistory();
       saveCurrentProjectToLibrary({ toast: false, validate: false });
       saveProject();
       closeProjectManager();
@@ -1082,7 +1249,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (referenceWindow) {
         const assembly = ensureAssemblyForReference(referenceWindow);
         const placement = createAssemblyPlacement(win.windowId, referenceWindow.windowId, "right", { gapMm: 0, rotationDeg: 0 });
-        assembly.placements.push(placement);
+        addAssemblyPlacementWithInsert(assembly, placement, referenceWindow, win);
         selectedAssemblyId = assembly.assemblyId;
         selectedPlacementId = placement.placementId;
         drawingMode = "assembly";
@@ -1136,6 +1303,195 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return win.topology?.members?.find(member => member.memberId === selectedMemberId) || null;
     }
 
+    function clearDividerSelection() {
+      selectedDivider = { windowId: "", axis: "", index: -1 };
+    }
+
+    function throughDividerLabel(axis, index) {
+      return `贯通${axis === "column" ? "竖梃" : "横梃"} ${index + 1}`;
+    }
+
+    function throughDividerTarget(axis, index) {
+      return `throughDivider:${axis}:${index}`;
+    }
+
+    function localMemberPositionTarget(memberId) {
+      return `localMemberPosition:${memberId}`;
+    }
+
+    function selectedDividerMatches(win, axis, index) {
+      return Boolean(
+        win &&
+        selectedDivider.windowId === win.windowId &&
+        selectedDivider.axis === axis &&
+        Number(selectedDivider.index) === Number(index)
+      );
+    }
+
+    function currentThroughDivider() {
+      if (!selectedDivider.windowId) return null;
+      const win = project.windows.find(item => item.windowId === selectedDivider.windowId);
+      if (!win) return null;
+      const axis = selectedDivider.axis;
+      const weights = axis === "column" ? win.layout.columns : axis === "row" ? win.layout.rows : [];
+      const index = Number(selectedDivider.index);
+      if (!weights || index < 0 || index >= weights.length - 1) return null;
+      const total = sum(weights);
+      const before = weights.slice(0, index + 1).reduce((result, value) => result + Number(value || 0), 0);
+      const spanMm = axis === "column" ? win.widthMm : win.heightMm;
+      return {
+        win,
+        axis,
+        index,
+        label: throughDividerLabel(axis, index),
+        positionPercent: total ? before / total * 100 : 50,
+        beforeMm: total ? Number(weights[index] || 0) / total * spanMm : 0,
+        afterMm: total ? Number(weights[index + 1] || 0) / total * spanMm : 0
+      };
+    }
+
+    function selectThroughDivider(win, axis, index, options = {}) {
+      if (!win) return false;
+      const weights = axis === "column" ? win.layout.columns : axis === "row" ? win.layout.rows : [];
+      const safeIndex = Math.max(0, Math.min(weights.length - 2, Number(index) || 0));
+      if (safeIndex < 0 || weights.length < 2) return false;
+      selectedWindowId = win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === win.windowId)?.placementId || "";
+      selectedMemberId = "";
+      selectedJointId = "";
+      selectedMarkupId = "";
+      selectedDivider = { windowId: win.windowId, axis, index: safeIndex };
+      if (axis === "column") selectedCell = { row: 0, col: Math.min(safeIndex, win.layout.columns.length - 1) };
+      else selectedCell = { row: Math.min(safeIndex, win.layout.rows.length - 1), col: 0 };
+      switchInspector(options.inspector || "window");
+      return true;
+    }
+
+    function applyThroughDividerPosition(win, axis, index, positionPercent) {
+      const weights = axis === "column" ? win?.layout?.columns : axis === "row" ? win?.layout?.rows : null;
+      if (!win || !weights || weights.length < 2) return false;
+      const safeIndex = Math.max(0, Math.min(weights.length - 2, Number(index) || 0));
+      const total = sum(weights);
+      const spanMm = axis === "column" ? win.widthMm : win.heightMm;
+      if (!total || spanMm <= 0) return false;
+      const sizes = weights.map(value => Number(value || 0) / total * spanMm);
+      const pairStart = sizes.slice(0, safeIndex).reduce((result, value) => result + value, 0);
+      const pairTotal = sizes[safeIndex] + sizes[safeIndex + 1];
+      if (pairTotal <= 2) return false;
+      const minimum = Math.min(120, Math.max(1, pairTotal / 2 - 1));
+      const requested = spanMm * Math.max(0, Math.min(100, Number(positionPercent))) / 100;
+      const nextBoundary = Math.max(pairStart + minimum, Math.min(pairStart + pairTotal - minimum, requested));
+      sizes[safeIndex] = nextBoundary - pairStart;
+      sizes[safeIndex + 1] = pairTotal - sizes[safeIndex];
+      if (axis === "column") win.layout.columns = sizes;
+      else win.layout.rows = sizes;
+      selectThroughDivider(win, axis, safeIndex);
+      return true;
+    }
+
+    function mergeDividerCells(primary, secondary, windowId) {
+      const base = structuredClone(primary || secondary || createCell("fixed_glass", "fixed"));
+      const alternate = secondary && primary?.type !== "empty" ? secondary : primary;
+      const source = primary?.type === "empty" && secondary?.type !== "empty" ? secondary : base;
+      const keepId = primary?.cellId || secondary?.cellId || createCellId();
+      const merged = {
+        ...structuredClone(source),
+        cellId: keepId
+      };
+      const markups = [
+        ...normalizeCellMarkups(primary?.markups),
+        ...normalizeCellMarkups(secondary?.markups)
+      ].map(markup => ({
+        ...markup,
+        hostType: "cell",
+        hostWindowId: windowId,
+        hostCellId: keepId
+      }));
+      if (alternate?.customShape && !merged.customShape) merged.customShape = structuredClone(alternate.customShape);
+      merged.markups = markups;
+      return merged;
+    }
+
+    function remapTopologyMembers(win, cellIdMap) {
+      const members = (win.topology?.members || []).map(member => ({
+        ...member,
+        hostRegionId: cellIdMap.get(member.hostRegionId) || member.hostRegionId
+      }));
+      win.topology = normalizeTopology({ ...win.topology, members }, win.layout);
+    }
+
+    function deleteSelectedThroughDivider() {
+      const divider = currentThroughDivider();
+      if (!divider) return false;
+      const { win, axis, index } = divider;
+      const cols = win.layout.columns.length;
+      const rows = win.layout.rows.length;
+      const cellIdMap = new Map();
+      if (axis === "column") {
+        if (cols < 2) return false;
+        win.layout.columns.splice(index, 2, Number(win.layout.columns[index] || 0) + Number(win.layout.columns[index + 1] || 0));
+        const oldCells = win.layout.cells;
+        const nextCells = [];
+        for (let row = 0; row < rows; row += 1) {
+          for (let col = 0; col < cols; col += 1) {
+            const cell = oldCells[cellIndex(row, col, cols)];
+            if (col === index) {
+              const neighbor = oldCells[cellIndex(row, col + 1, cols)];
+              const merged = mergeDividerCells(cell, neighbor, win.windowId);
+              if (cell?.cellId) cellIdMap.set(cell.cellId, merged.cellId);
+              if (neighbor?.cellId) cellIdMap.set(neighbor.cellId, merged.cellId);
+              nextCells.push(merged);
+              col += 1;
+              continue;
+            }
+            if (cell?.cellId) cellIdMap.set(cell.cellId, cell.cellId);
+            nextCells.push(cell);
+          }
+        }
+        win.layout.cells = nextCells;
+        selectedCell = { row: Math.min(selectedCell.row, rows - 1), col: Math.max(0, Math.min(index, win.layout.columns.length - 1)) };
+      } else if (axis === "row") {
+        if (rows < 2) return false;
+        win.layout.rows.splice(index, 2, Number(win.layout.rows[index] || 0) + Number(win.layout.rows[index + 1] || 0));
+        const oldCells = win.layout.cells;
+        const nextCells = [];
+        for (let row = 0; row < rows; row += 1) {
+          if (row === index) {
+            for (let col = 0; col < cols; col += 1) {
+              const cell = oldCells[cellIndex(row, col, cols)];
+              const neighbor = oldCells[cellIndex(row + 1, col, cols)];
+              const merged = mergeDividerCells(cell, neighbor, win.windowId);
+              if (cell?.cellId) cellIdMap.set(cell.cellId, merged.cellId);
+              if (neighbor?.cellId) cellIdMap.set(neighbor.cellId, merged.cellId);
+              nextCells.push(merged);
+            }
+            row += 1;
+            continue;
+          }
+          for (let col = 0; col < cols; col += 1) {
+            const cell = oldCells[cellIndex(row, col, cols)];
+            if (cell?.cellId) cellIdMap.set(cell.cellId, cell.cellId);
+            nextCells.push(cell);
+          }
+        }
+        win.layout.cells = nextCells;
+        selectedCell = { row: Math.max(0, Math.min(index, win.layout.rows.length - 1)), col: Math.min(selectedCell.col, cols - 1) };
+      } else {
+        return false;
+      }
+      remapTopologyMembers(win, cellIdMap);
+      selectedWindowId = win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === win.windowId)?.placementId || "";
+      selectedMemberId = "";
+      selectedJointId = "";
+      selectedMarkupId = "";
+      clearDividerSelection();
+      switchInspector("cell");
+      markDirty();
+      showToast(`${divider.label}已删除，相邻分格已合并。`);
+      return true;
+    }
+
     function currentJoint() {
       if (!selectedJointId) return null;
       return project.joints?.find(joint => joint.jointId === selectedJointId) || null;
@@ -1170,6 +1526,24 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return null;
     }
 
+    function findWindowMarkup(markupId) {
+      if (!markupId) return null;
+      const selected = currentWindow();
+      const windows = [
+        selected,
+        ...project.windows.filter(win => win.windowId !== selected?.windowId)
+      ].filter(Boolean);
+      for (const win of windows) {
+        const markup = (Array.isArray(win.markups) ? win.markups : []).find(item => item?.markupId === markupId);
+        if (markup) return { win, markup, row: -1, col: -1, hostType: "window" };
+      }
+      return null;
+    }
+
+    function findMarkupObject(markupId) {
+      return findWindowMarkup(markupId) || findCellMarkup(markupId);
+    }
+
     function cloneCell(cell) {
       const cloned = {
         ...structuredClone(cell),
@@ -1183,7 +1557,96 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return cloned;
     }
 
+    function updateHistoryControls() {
+      const undoButton = document.getElementById("btnUndoProject");
+      const redoButton = document.getElementById("btnRedoProject");
+      if (undoButton) undoButton.disabled = editHistory.undo.length === 0;
+      if (redoButton) redoButton.disabled = editHistory.redo.length === 0;
+    }
+
+    function resetEditHistory() {
+      editHistory.undo = [];
+      editHistory.redo = [];
+      editHistory.baseline = JSON.stringify(project);
+      updateHistoryControls();
+    }
+
+    function rememberEditHistory() {
+      if (editHistory.restoring) return;
+      const currentSnapshot = JSON.stringify(project);
+      const baseline = editHistory.baseline || currentSnapshot;
+      if (currentSnapshot === baseline) return;
+      editHistory.undo.push(baseline);
+      if (editHistory.undo.length > editHistory.max) editHistory.undo.shift();
+      editHistory.redo = [];
+      editHistory.baseline = currentSnapshot;
+      updateHistoryControls();
+    }
+
+    function restoreProjectSnapshot(snapshot, label) {
+      if (!snapshot) return;
+      try {
+        editHistory.restoring = true;
+        project = normalizeProject(JSON.parse(snapshot));
+        previewNeedsRebuild = true;
+        saveProject();
+        render();
+        editHistory.baseline = JSON.stringify(project);
+        updateHistoryControls();
+        showToast(label);
+      } catch (error) {
+        showToast(`恢复失败：${error.message}`);
+      } finally {
+        editHistory.restoring = false;
+      }
+    }
+
+    function undoProjectEdit() {
+      if (!editHistory.undo.length) {
+        showToast("没有可撤销的操作。");
+        return;
+      }
+      const target = editHistory.undo.pop();
+      editHistory.redo.push(JSON.stringify(project));
+      restoreProjectSnapshot(target, "已撤销上一步操作。");
+    }
+
+    function redoProjectEdit() {
+      if (!editHistory.redo.length) {
+        showToast("没有可重做的操作。");
+        return;
+      }
+      const target = editHistory.redo.pop();
+      editHistory.undo.push(JSON.stringify(project));
+      if (editHistory.undo.length > editHistory.max) editHistory.undo.shift();
+      restoreProjectSnapshot(target, "已重做上一步操作。");
+    }
+
+    function shouldHandleHistoryShortcut(event) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+      const target = event.target;
+      const tag = String(target?.tagName || "").toUpperCase();
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return false;
+      return true;
+    }
+
+    function handleHistoryShortcut(event) {
+      if (!shouldHandleHistoryShortcut(event)) return;
+      const key = String(event.key || "").toLowerCase();
+      if (key === "z" && event.shiftKey) {
+        event.preventDefault();
+        redoProjectEdit();
+      } else if (key === "z") {
+        event.preventDefault();
+        undoProjectEdit();
+      } else if (key === "y") {
+        event.preventDefault();
+        redoProjectEdit();
+      }
+    }
+
     function markDirty() {
+      rememberEditHistory();
       previewNeedsRebuild = true;
       if (project.calculation.status === "confirmed" || project.calculation.status === "frozen") {
         project.calculation.status = "changed";
@@ -1192,6 +1655,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         project.calculation.status = "draft";
       }
       saveProject();
+      if (!editHistory.restoring) editHistory.baseline = JSON.stringify(project);
       render();
     }
 
@@ -1218,6 +1682,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       bom = calculateProjectBom(project);
       saveProject();
       render();
+      if (!editHistory.restoring) editHistory.baseline = JSON.stringify(project);
+      updateHistoryControls();
     }
 
     function confirmBom() {
@@ -1291,10 +1757,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       win.shape = normalizeWindowShape({
         type: shapeType,
         archHeightMm: Math.max(0, Number(valueOf("archHeight") || 0)),
+        shapeAngleDeg: Number(valueOf("shapeAngle") || 0),
         points: shapeType === "custom_polygon" ? parseShapePointsText(valueOf("shapePoints"), currentPoints) : []
       });
       win.installation ||= { sillHeightMm: 0 };
-      win.installation.sillHeightMm = Math.max(0, Number(valueOf("sillHeight") || 0));
+      const sillHeightMm = Math.max(0, Number(valueOf("sillHeight") || 0));
+      win.installation.sillHeightMm = sillHeightMm;
+      setValue("installationSillHeight", sillHeightMm);
       markDirty();
     }
 
@@ -1497,10 +1966,25 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (typeChanged) {
         cell.openingAssembly = defaultOpeningAssembly(nextType, cell.opening);
       } else {
+        const openingChanged = previousOpening !== cell.opening;
         const directional = previousOpening !== cell.opening
           ? alignAssemblyToOpening(nextType, cell.opening, cell.openingAssembly)
           : cell.openingAssembly;
         cell.openingAssembly = readOpeningAssemblyInputs(nextType, cell.opening, directional);
+        if (openingChanged && event?.target?.id === "opening") {
+          cell.openingAssembly = normalizeOpeningAssembly(nextType, cell.opening, {
+            ...cell.openingAssembly,
+            openPlane: directional.openPlane
+          });
+          setValue("assemblyOpenPlane", cell.openingAssembly.openPlane);
+        } else {
+          const syncedOpening = openingWithPlane(nextType, cell.opening, cell.openingAssembly.openPlane);
+          if (syncedOpening !== cell.opening) {
+            cell.opening = syncedOpening;
+            cell.openingAssembly = normalizeOpeningAssembly(nextType, cell.opening, cell.openingAssembly);
+            setValue("opening", cell.opening);
+          }
+        }
       }
       cell.glassTypeId = valueOf("cellGlass");
       cell.hardwareSetId = typeChanged ? defaultHardwareSetForType(nextType) : valueOf("cellHardware");
@@ -1522,6 +2006,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           ...assembly,
           screenMode: cell.accessories.screenMode
         };
+        ensureDefaultLockMarkup(win, cell, { repositionExisting: typeChanged || previousOpening !== cell.opening });
+      } else {
+        removeDefaultLockMarkup(cell);
       }
       cell.handleHeightMm = Math.max(0, Number(valueOf("handleHeight") || 0));
       cell.note = valueOf("cellNote");
@@ -1539,6 +2026,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         primarySide: valueOf("assemblyPrimarySide"),
         mullionMode: valueOf("assemblyMullionMode"),
         openPlane: valueOf("assemblyOpenPlane"),
+        openPercent: Number(valueOf("assemblyOpenPercent")),
         operationPriority: valueOf("assemblyOperationPriority"),
         ventilationMode: valueOf("assemblyVentilationMode"),
         trafficDoor: valueOf("assemblyTrafficDoor"),
@@ -1565,6 +2053,18 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         next.openPlane = opening.endsWith("out") ? "out" : "in";
       }
       return next;
+    }
+
+    function openingWithPlane(type, opening, plane) {
+      if (!["turn", "door", "top_hung", "bottom_hung"].includes(type)) return opening;
+      const suffix = plane === "out" ? "out" : "in";
+      if (["turn", "door"].includes(type)) {
+        const hingeSide = String(opening || "").startsWith("right") ? "right" : "left";
+        return normalizeOpening(type, `${hingeSide}_${suffix}`);
+      }
+      if (type === "top_hung") return normalizeOpening(type, `top_${suffix}`);
+      if (type === "bottom_hung") return normalizeOpening(type, `bottom_${suffix}`);
+      return opening;
     }
 
     function updateViewOptionsFromInputs() {
@@ -1602,6 +2102,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win) return;
       selectedMemberId = "";
       selectedJointId = "";
+      clearDividerSelection();
       const oldCols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const oldCells = win.layout.cells;
@@ -1633,6 +2134,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win || win.layout.columns.length <= 1) return;
       selectedMemberId = "";
       selectedJointId = "";
+      clearDividerSelection();
       const oldCols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       win.layout.columns.pop();
@@ -1650,6 +2152,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win || win.layout.rows.length <= 1) return;
       selectedMemberId = "";
       selectedJointId = "";
+      clearDividerSelection();
       const cols = win.layout.columns.length;
       win.layout.rows.pop();
       win.layout.cells = win.layout.cells.slice(0, win.layout.rows.length * cols);
@@ -1698,6 +2201,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       selectedCell = { row, col };
       selectedJointId = "";
       selectedMemberId = member.memberId;
+      clearDividerSelection();
       switchInspector("member");
       if (options.markDirty !== false) markDirty();
       return member;
@@ -1708,15 +2212,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win) return;
       selectedMemberId = "";
       selectedJointId = "";
+      clearDividerSelection();
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const col = Math.min(selectedCell.col, cols - 1);
-      const row = Math.min(selectedCell.row, rows - 1);
-      if (partCount === 2 && rows > 1) {
-        const member = addSegmentedLocalMullion(win, row, col, "vertical");
-        if (member) showToast("已有横向分隔，已在选中窗格加入局部竖梃，未切穿横梃。");
-        return;
-      }
       const oldCells = win.layout.cells;
       const count = Math.max(2, Math.min(6, Number(partCount) || 2));
       const weight = Number(win.layout.columns[col] || 1) / count;
@@ -1733,6 +2232,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       win.layout.cells = next;
       selectedCell = { row: selectedCell.row, col: col + count - 1 };
+      selectThroughDivider(win, "column", col);
       markDirty();
     }
 
@@ -1744,12 +2244,6 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
       const row = Math.min(selectedCell.row, rows - 1);
-      const col = Math.min(selectedCell.col, cols - 1);
-      if (partCount === 2 && cols > 1) {
-        const member = addSegmentedLocalMullion(win, row, col, "horizontal");
-        if (member) showToast("已有竖向分隔，已在选中窗格加入局部横梃，未切穿竖梃。");
-        return;
-      }
       const oldCells = win.layout.cells;
       const count = Math.max(2, Math.min(6, Number(partCount) || 2));
       const weight = Number(win.layout.rows[row] || 1) / count;
@@ -1765,6 +2259,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       win.layout.cells = next;
       selectedCell = { row: row + count - 1, col: selectedCell.col };
+      selectThroughDivider(win, "row", row);
       markDirty();
     }
 
@@ -1788,6 +2283,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           createCell("turn", "right_in")
         ]
       });
+      win.layout.cells.forEach(cell => ensureDefaultLockMarkup(win, cell));
       win.geometryMode = "grid";
       win.topology = normalizeTopology(null, win.layout);
       selectedMemberId = "";
@@ -1826,8 +2322,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedJointId = "";
         drawingMode = "window";
         switchInspector("window");
-        render();
-        showToast(`已选择${cellPresetLabel(type, options)}，请在空画布点击放置第一樘窗。`);
+        createRootWindowFromCanvasCommand();
         return;
       }
       const joint = currentJoint();
@@ -1871,6 +2366,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
     function startCellMarkupPlacement(kind) {
+      if (kind === "text") {
+        startRootTextMarkupPlacement();
+        return;
+      }
       const win = currentWindow();
       if (!win) return;
       canvasCommand = {
@@ -1928,6 +2427,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       cell.glassTypeId = glassTypeId || next.glassTypeId;
       cell.hardwareSetId = next.hardwareSetId;
       cell.panelTypeId = panelTypeId || next.panelTypeId;
+      if (isOperableType(cell.type)) {
+        ensureDefaultLockMarkup(win, cell, { repositionExisting: true });
+      } else {
+        removeDefaultLockMarkup(cell);
+      }
       if (type === "sliding") {
         const slidingSeries = project.catalog.profileSystems.find(series => series.name?.includes("推拉") || series.id?.toLowerCase().includes("slide"));
         if (slidingSeries) win.seriesId = slidingSeries.id;
@@ -2063,8 +2567,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         };
         drawingMode = "window";
         switchInspector("window");
-        render();
-        showToast(`已选择${shapeLabel(type)}，请在空画布点击放置第一樘窗。`);
+        createRootWindowFromCanvasCommand();
         return;
       }
       const joint = currentJoint();
@@ -2084,7 +2587,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         openDiyShapeEditor({ blank: true });
         return;
       }
-      createWindowFromShapePreset(type);
+      openShapePlacementDialog(type);
     }
 
     function applyCustomShapeElement(shapeId) {
@@ -2170,6 +2673,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       switchInspector("cell");
       markDirty();
       showToast("局部中梃已删除。");
+    }
+
+    function editSelectedMullionFromMenu(event) {
+      const divider = currentThroughDivider();
+      hideMemberContextMenu();
+      if (divider) {
+        openCanvasDimensionEditor(throughDividerTarget(divider.axis, divider.index), event);
+        return;
+      }
+      if (selectedMemberId && currentMember()) {
+        switchInspector("member");
+        render();
+      }
+    }
+
+    function deleteSelectedMullion() {
+      if (currentThroughDivider()) {
+        deleteSelectedThroughDivider();
+        return;
+      }
+      deleteSelectedMember();
     }
 
     function startEngineeringJointPlacement(type) {
@@ -2385,6 +2909,101 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return assembly;
     }
 
+    function placementOrthogonalSpan(referenceWindow, childWindow, placement) {
+      const dock = placement?.dock || "right";
+      const align = placement?.align || "center";
+      const offset = Number(placement?.offsetMm || 0);
+      if (dock === "left" || dock === "right") {
+        const refH = Number(referenceWindow?.heightMm || 0);
+        const childH = Number(childWindow?.heightMm || 0);
+        const start = align === "start"
+          ? 0
+          : align === "end"
+            ? refH - childH
+            : (refH - childH) / 2;
+        return [start + offset, start + offset + childH];
+      }
+      if (dock === "top" || dock === "bottom") {
+        const refW = Number(referenceWindow?.widthMm || 0);
+        const childW = Number(childWindow?.widthMm || 0);
+        const start = align === "start"
+          ? 0
+          : align === "end"
+            ? refW - childW
+            : (refW - childW) / 2;
+        return [start + offset, start + offset + childW];
+      }
+      return [0, 0];
+    }
+
+    function oppositeDock(dock) {
+      return { left: "right", right: "left", top: "bottom", bottom: "top" }[dock] || "";
+    }
+
+    function insertionAnchorForSide(assembly, referenceWindow, requestedDock) {
+      const upstreamDock = oppositeDock(requestedDock);
+      const upstreamPlacement = (assembly?.placements || []).find(placement => (
+        placement.windowId === referenceWindow.windowId && placement.dock === upstreamDock
+      ));
+      const upstreamWindow = upstreamPlacement
+        ? project.windows.find(win => win.windowId === upstreamPlacement.referenceWindowId)
+        : null;
+      if (upstreamWindow) {
+        return { referenceWindow: upstreamWindow, dock: upstreamPlacement.dock, requestedDock, viaUpstream: true };
+      }
+      return { referenceWindow, dock: requestedDock, requestedDock, viaUpstream: false };
+    }
+
+    function spansOverlap(a, b) {
+      return Math.min(a[1], b[1]) - Math.max(a[0], b[0]) > 1;
+    }
+
+    function occupiedPlacementsForInsert(assembly, referenceWindow, childWindow, dock) {
+      if (!assembly || !referenceWindow || !childWindow || !["left", "right", "top", "bottom"].includes(dock)) return [];
+      const newSpan = placementOrthogonalSpan(referenceWindow, childWindow, { dock, align: "center", offsetMm: 0 });
+      return (assembly.placements || []).filter(placement => {
+        if (placement.referenceWindowId !== referenceWindow.windowId || placement.dock !== dock) return false;
+        const existingWindow = project.windows.find(win => win.windowId === placement.windowId);
+        if (!existingWindow) return false;
+        return spansOverlap(newSpan, placementOrthogonalSpan(referenceWindow, existingWindow, placement));
+      });
+    }
+
+    function rehostInsertedPlacementJoint(placement, newReferenceWindowId) {
+      if (!placement?.jointId) return;
+      const joint = project.joints?.find(item => item.jointId === placement.jointId);
+      if (!joint) return;
+      joint.hostWindowId = newReferenceWindowId;
+      joint.hostEdge = hostEdgeForDock(placement.dock);
+      joint.connectedWindowIds = [...new Set([newReferenceWindowId, placement.windowId])];
+    }
+
+    function addAssemblyPlacementWithInsert(assembly, placement, referenceWindow, childWindow) {
+      const blockers = occupiedPlacementsForInsert(assembly, referenceWindow, childWindow, placement.dock);
+      if (!blockers.length) {
+        assembly.placements.push(placement);
+        return 0;
+      }
+      const blockerIds = new Set(blockers.map(item => item.placementId));
+      const next = [];
+      let inserted = false;
+      for (const existing of assembly.placements || []) {
+        if (!inserted && blockerIds.has(existing.placementId)) {
+          next.push(placement);
+          inserted = true;
+        }
+        if (blockerIds.has(existing.placementId)) {
+          existing.referenceWindowId = childWindow.windowId;
+          existing.dock = placement.dock;
+          rehostInsertedPlacementJoint(existing, childWindow.windowId);
+        }
+        next.push(existing);
+      }
+      if (!inserted) next.push(placement);
+      assembly.placements = next;
+      return blockers.length;
+    }
+
     function nextWindowMark() {
       const usedMarks = new Set(project.windows.map(win => win.mark));
       for (let index = project.windows.length + 1; index < project.windows.length + 1000; index += 1) {
@@ -2496,7 +3115,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           project.windows.push(movingWindow);
           createdWindow = true;
         }
-        const placement = createAssemblyPlacement(movingWindow.windowId, referenceWindow.windowId, dock, {
+        const anchor = dock === "free"
+          ? { referenceWindow, dock }
+          : insertionAnchorForSide(assembly, referenceWindow, dock);
+        const placement = createAssemblyPlacement(movingWindow.windowId, anchor.referenceWindow.windowId, anchor.dock, {
           gapMm: placementGapForJoint(useJoint),
           rotationDeg: placementRotationForJoint(useJoint),
           jointId: useJoint?.jointId || "",
@@ -2504,7 +3126,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             ? { xMm: (Number(referenceWindow.widthMm || 0) + Number(movingWindow.widthMm || 0)) / 2 + 300, yMm: 0, zMm: 0 }
             : undefined
         });
-        assembly.placements.push(placement);
+        addAssemblyPlacementWithInsert(assembly, placement, anchor.referenceWindow, movingWindow);
         if (useJoint) {
           useJoint.connectedWindowIds = [...new Set([
             useJoint.hostWindowId,
@@ -2610,12 +3232,58 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       showToast("当前没有独立新建门窗流程，请从左侧门/窗框工具在画布上添加。");
     }
 
-    function createWindowFromShapePreset(type) {
-      const referenceWindow = currentWindow();
-      const normalizedShape = normalizeWindowShape({
-        type: SHAPE_PRESET_BY_TYPE[type] ? type : "rectangular",
-        archHeightMm: type === "arched" ? 220 : 0
+    function shapePresetShape(type) {
+      const safeType = SHAPE_PRESET_BY_TYPE[type] ? type : "rectangular";
+      return normalizeWindowShape({
+        type: safeType,
+        archHeightMm: safeType === "arched" ? 220 : 0
       });
+    }
+
+    function openShapePlacementDialog(type) {
+      const win = currentWindow();
+      if (!win) return;
+      pendingShapePlacementType = SHAPE_PRESET_BY_TYPE[type] ? type : "rectangular";
+      const dialog = document.getElementById("shapePlacementDialog");
+      const subtitle = document.getElementById("shapePlacementSubtitle");
+      if (subtitle) {
+        subtitle.textContent = `${win.mark} 已选中，要把${shapeLabel(pendingShapePlacementType)}替换当前窗框，还是在上下左右新增？`;
+      }
+      if (dialog?.showModal && !dialog.open) dialog.showModal();
+    }
+
+    function closeShapePlacementDialog() {
+      const dialog = document.getElementById("shapePlacementDialog");
+      if (dialog?.open) dialog.close();
+    }
+
+    function chooseShapePlacement(action) {
+      const type = pendingShapePlacementType || "rectangular";
+      closeShapePlacementDialog();
+      if (action === "replace") {
+        createWindowFromShapePreset(type, { replace: true });
+        return;
+      }
+      if (["left", "right", "top", "bottom"].includes(action)) {
+        createWindowFromShapePreset(type, { dock: action });
+      }
+    }
+
+    function createWindowFromShapePreset(type, options = {}) {
+      const referenceWindow = currentWindow();
+      const normalizedShape = shapePresetShape(type);
+      if (options.replace && referenceWindow) {
+        referenceWindow.shape = normalizedShape;
+        referenceWindow.name = shapeLabel(normalizedShape.type);
+        selectedMemberId = "";
+        selectedJointId = "";
+        selectedMarkupId = "";
+        clearDividerSelection();
+        switchInspector("window");
+        markDirty();
+        showToast(`已将${referenceWindow.mark}替换为${shapeLabel(normalizedShape.type)}。`);
+        return;
+      }
       const win = createWindow({
         mark: nextWindowMark(),
         name: shapeLabel(type),
@@ -2637,18 +3305,21 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       selectedPlacementId = "";
       if (referenceWindow) {
         const assembly = ensureAssemblyForReference(referenceWindow);
-        const placement = createAssemblyPlacement(win.windowId, referenceWindow.windowId, "right", { gapMm: 0, rotationDeg: 0 });
-        assembly.placements.push(placement);
+        const placementDock = ["left", "right", "top", "bottom", "free"].includes(options.dock) ? options.dock : "right";
+        const anchor = insertionAnchorForSide(assembly, referenceWindow, placementDock);
+        const placement = createAssemblyPlacement(win.windowId, anchor.referenceWindow.windowId, anchor.dock, { gapMm: 0, rotationDeg: 0 });
+        const insertedCount = addAssemblyPlacementWithInsert(assembly, placement, anchor.referenceWindow, win);
         selectedAssemblyId = assembly.assemblyId;
         selectedPlacementId = placement.placementId;
         drawingMode = "assembly";
         switchInspector("assembly");
+        if (insertedCount) placement.note = `已插入${insertedCount}樘相邻窗前`;
       } else {
         drawingMode = "window";
         switchInspector("window");
       }
       markDirty();
-      showToast(`已生成${shapeLabel(type)}窗框。`);
+      showToast(`已在${referenceWindow ? dockLabel(options.dock || "right") : "画布"}${referenceWindow && selectedPlacementId && currentPlacement()?.note ? "插入" : "生成"}${shapeLabel(type)}窗框。`);
     }
 
     function createRootWindowFromCanvasCommand() {
@@ -2706,6 +3377,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const copy = structuredClone(win);
       copy.windowId = `W-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       copy.mark = `${win.mark}-副本`;
+      copy.markups = normalizeWindowMarkups(copy.markups).map(markup => ({
+        ...markup,
+        markupId: createMarkupId(),
+        hostType: "window",
+        hostWindowId: copy.windowId,
+        hostCellId: ""
+      }));
       const cellIdMap = new Map();
       copy.layout.cells = copy.layout.cells.map(cell => {
         const oldCellId = cell.cellId;
@@ -2713,6 +3391,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         cellIdMap.set(oldCellId, cloned.cellId);
         cloned.markups = normalizeCellMarkups(cloned.markups).map(markup => ({
           ...markup,
+          markupId: createMarkupId(),
           hostType: "cell",
           hostWindowId: copy.windowId,
           hostCellId: cloned.cellId
@@ -2735,7 +3414,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!isEmbeddedFrame(win)) {
         const assembly = ensureAssemblyForReference(win);
         const placement = createAssemblyPlacement(copy.windowId, win.windowId, "right", { gapMm: 0, rotationDeg: 0 });
-        assembly.placements.push(placement);
+        addAssemblyPlacementWithInsert(assembly, placement, win, copy);
         selectedAssemblyId = assembly.assemblyId;
         selectedPlacementId = placement.placementId;
         drawingMode = "assembly";
@@ -2744,8 +3423,74 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       markDirty();
     }
 
+    function selectMarkupObject(markupId) {
+      const found = findMarkupObject(markupId);
+      if (!found) return null;
+      selectedWindowId = found.win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
+      selectedMarkupId = found.markup.markupId;
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      selectedCell = found.hostType === "window" ? { row: 0, col: 0 } : { row: found.row, col: found.col };
+      switchInspector(found.hostType === "window" ? "window" : "cell");
+      return found;
+    }
+
+    function deleteSelectedMarkup() {
+      const found = selectedMarkupId ? findMarkupObject(selectedMarkupId) : null;
+      if (!found) return false;
+      const label = markupToolLabel(found.markup.kind);
+      if (found.hostType === "window") {
+        found.win.markups = normalizeWindowMarkups(found.win.markups).filter(item => item.markupId !== selectedMarkupId);
+      } else {
+        found.cell.markups = normalizeCellMarkups(found.cell.markups).filter(item => item.markupId !== selectedMarkupId);
+      }
+      selectedWindowId = found.win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
+      selectedCell = found.hostType === "window" ? { row: 0, col: 0 } : { row: found.row, col: found.col };
+      selectedMarkupId = "";
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      switchInspector(found.hostType === "window" ? "window" : "cell");
+      markDirty();
+      showToast(`${label}已删除。`);
+      return true;
+    }
+
+    function markupGroupFromEvent(event) {
+      const direct = event.target?.closest?.(".cell-markup");
+      if (direct?.dataset?.markupId) return direct;
+      const pathGroup = event.composedPath?.().find(item => item?.classList?.contains?.("cell-markup"));
+      return pathGroup?.dataset?.markupId ? pathGroup : null;
+    }
+
+    function openMarkupContextMenuFromGroup(group, event) {
+      const markupId = group?.dataset?.markupId || "";
+      if (!markupId) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!selectMarkupObject(markupId)) return false;
+      render();
+      showMarkupContextMenu(event, markupId);
+      return true;
+    }
+
+    function bindCanvasMarkupContextMenus(svg) {
+      svg.querySelectorAll(".cell-markup").forEach(group => {
+        group.addEventListener("contextmenu", event => openMarkupContextMenuFromGroup(group, event));
+      });
+      svg.addEventListener("contextmenu", event => {
+        const group = markupGroupFromEvent(event);
+        if (group) openMarkupContextMenuFromGroup(group, event);
+      }, true);
+    }
+
     function removeWindowObject(windowId) {
       if (!windowId) return;
+      const remainingWindowIds = new Set(project.windows.filter(win => win.windowId !== windowId).map(win => win.windowId));
+      const removedJointIds = new Set((project.joints || []).filter(joint => joint.hostWindowId === windowId).map(joint => joint.jointId));
       project.windows = project.windows.filter(win => win.windowId !== windowId);
       project.joints = (project.joints || [])
         .filter(joint => joint.hostWindowId !== windowId)
@@ -2754,13 +3499,45 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           connectedWindowIds: (joint.connectedWindowIds || []).filter(id => id !== windowId)
         }));
       project.assemblies = (project.assemblies || [])
-        .map(assembly => ({
-          ...assembly,
-          placements: (assembly.placements || []).filter(placement => (
-            placement.windowId !== windowId && placement.referenceWindowId !== windowId
-          ))
-        }))
-        .filter(assembly => assembly.rootWindowId !== windowId && assembly.placements.length);
+        .map(assembly => {
+          let rootWindowId = assembly.rootWindowId;
+          let placements = (assembly.placements || []).map(placement => ({ ...placement }));
+          const removedPlacement = placements.find(placement => placement.windowId === windowId);
+          if (rootWindowId === windowId) {
+            const nextRoot = placements.find(placement => placement.windowId !== windowId && remainingWindowIds.has(placement.windowId));
+            if (!nextRoot) return { ...assembly, rootWindowId: "", placements: [] };
+            rootWindowId = nextRoot.windowId;
+            placements = placements
+              .filter(placement => placement.windowId !== windowId && placement.windowId !== rootWindowId)
+              .map(placement => ({
+                ...placement,
+                referenceWindowId: placement.referenceWindowId === windowId || placement.referenceWindowId === rootWindowId
+                  ? rootWindowId
+                  : placement.referenceWindowId
+              }));
+          } else {
+            const upstreamWindowId = removedPlacement?.referenceWindowId || rootWindowId;
+            placements = placements
+              .filter(placement => placement.windowId !== windowId)
+              .map(placement => {
+                if (placement.referenceWindowId !== windowId) return placement;
+                const removedJoint = removedJointIds.has(placement.jointId);
+                return {
+                  ...placement,
+                  referenceWindowId: upstreamWindowId,
+                  jointId: removedJoint ? "" : placement.jointId,
+                  gapMm: removedJoint ? 0 : placement.gapMm
+                };
+              });
+          }
+          placements = placements.filter(placement => (
+            remainingWindowIds.has(placement.windowId)
+            && remainingWindowIds.has(placement.referenceWindowId)
+            && placement.windowId !== placement.referenceWindowId
+          ));
+          return { ...assembly, rootWindowId, placements };
+        })
+        .filter(assembly => assembly.rootWindowId && remainingWindowIds.has(assembly.rootWindowId) && assembly.placements.length);
     }
 
     function selectFallbackObject() {
@@ -2768,6 +3545,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       selectedMemberId = "";
       selectedJointId = "";
       selectedPlacementId = "";
+      clearDividerSelection();
       selectedCell = { row: 0, col: 0 };
       if (!project.windows.length) {
         selectedWindowId = "";
@@ -2783,16 +3561,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
     function deleteWindow() {
-      const markup = selectedMarkupId ? findCellMarkup(selectedMarkupId) : null;
-      if (markup) {
-        markup.cell.markups = normalizeCellMarkups(markup.cell.markups).filter(item => item.markupId !== selectedMarkupId);
-        selectedMarkupId = "";
-        markDirty();
-        showToast("标注已删除。");
-        return;
-      }
+      if (deleteSelectedMarkup()) return;
       if (selectedMemberId && currentMember()) {
         deleteSelectedMember();
+        return;
+      }
+      if (currentThroughDivider()) {
+        deleteSelectedThroughDivider();
         return;
       }
       if (selectedJointId && currentJoint()) {
@@ -3016,6 +3791,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedAssemblyId = project.assemblies[0]?.assemblyId || "";
         selectedPlacementId = "";
         selectedCell = { row: 0, col: 0 };
+        resetEditHistory();
         recalc("calculated");
         showToast("JSON已应用。");
       } catch (error) {
@@ -3034,6 +3810,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           selectedAssemblyId = project.assemblies[0]?.assemblyId || "";
           selectedPlacementId = "";
           selectedCell = { row: 0, col: 0 };
+          resetEditHistory();
           recalc("calculated");
           showToast("设计JSON已导入。");
         } catch (error) {
@@ -3120,6 +3897,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedWindowId = "";
         selectedMemberId = "";
         selectedJointId = "";
+        clearDividerSelection();
         selectedPlacementId = "";
         selectedMarkupId = "";
         selectedAssemblyId = "";
@@ -3131,6 +3909,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!project.assemblies.some(assembly => assembly.assemblyId === selectedAssemblyId)) selectedAssemblyId = project.assemblies[0]?.assemblyId || "";
       if (selectedPlacementId && !currentPlacement()) selectedPlacementId = "";
       if (selectedMemberId && !currentMember()) selectedMemberId = "";
+      if (selectedDivider.windowId && !currentThroughDivider()) clearDividerSelection();
       if (selectedJointId && !currentJoint()) selectedJointId = "";
       if (hasAssemblyScene()) drawingMode = "assembly";
       if (activeInspectorTab === "member" && !selectedMemberId) switchInspector("cell");
@@ -3149,6 +3928,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       renderBom();
       renderStatus();
       updateCanvasCommandControls();
+      updateHistoryControls();
       saveProject();
     }
 
@@ -3178,7 +3958,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           if (openingMatches && panelMatches && trackMatches && panelModeMatches) button.classList.add("command-active");
         });
       }
-      if (canvasCommand.mode === "add_cell_markup" && canvasCommand.markupType) {
+      if ((canvasCommand.mode === "add_cell_markup" || canvasCommand.mode === "add_root_markup") && canvasCommand.markupType) {
         document.querySelector(`[data-markup-tool="${CSS.escape(canvasCommand.markupType)}"]`)?.classList.add("command-active");
       }
     }
@@ -3198,8 +3978,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         setValue("winQty", "");
         setValue("winWidth", "");
         setValue("winHeight", "");
+        setValue("sillHeight", "");
+        setValue("installationSillHeight", "");
         setValue("winFloor", "");
         setValue("winRoom", "");
+        setValue("shapeAngle", "");
+        document.getElementById("shapeAngle")?.closest("label")?.classList.add("hidden");
         return;
       }
       setValue("winMark", win.mark);
@@ -3211,14 +3995,17 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         setValue("smartOpeningHeight", win.heightMm);
       }
       setValue("sillHeight", win.installation?.sillHeightMm || 0);
+      setValue("installationSillHeight", win.installation?.sillHeightMm || 0);
       setValue("winFloor", win.floor || "");
       setValue("winRoom", win.room || "");
       renderSelect("winShape", SHAPE_PRESETS.map(item => [item.type, item.label]), win.shape.type || "rectangular");
       setValue("archHeight", win.shape.archHeightMm || 0);
+      setValue("shapeAngle", win.shape.shapeAngleDeg || defaultShapeAngle(win.shape.type));
       setValue("shapePoints", formatShapePoints(win.shape.points || []));
       document.getElementById("shapePointsField")?.classList.toggle("hidden", win.shape.type !== "custom_polygon");
       document.getElementById("btnOpenDiyShapeEditor")?.classList.toggle("hidden", win.shape.type !== "custom_polygon");
       document.getElementById("archHeight")?.closest("label")?.classList.toggle("hidden", win.shape.type !== "arched");
+      document.getElementById("shapeAngle")?.closest("label")?.classList.toggle("hidden", !isAngledWindowShape(win.shape.type));
       renderSelect("seriesId", project.catalog.profileSystems.map(s => [s.id, `${s.id} · ${s.name}`]), win.seriesId);
       renderSelect("glassTypeId", project.catalog.glassTypes.map(g => [g.id, g.name]), win.defaultGlassTypeId);
       renderSelect("hardwareSetId", project.catalog.hardwareSets.map(h => [h.id, h.name]), win.defaultHardwareSetId);
@@ -3353,6 +4140,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         ["内/外色", `${win.colorInside || "-"} / ${win.colorOutside || "-"}`],
         ["默认玻璃", glass?.name || win.defaultGlassTypeId],
         ["默认五金", hardware?.name || win.defaultHardwareSetId],
+        ["台高", `${Math.round(win.installation?.sillHeightMm || 0)} mm`],
         ["安装包套", win.installation?.surround?.enabled ? surroundSummary(win.installation.surround, win.widthMm, win.heightMm).style : "未启用"]
       ].map(([label, value]) => `<li><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></li>`).join("");
       renderDesignerCapabilitySummary();
@@ -3373,6 +4161,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const series = currentSeries(win);
       const placement = resolveFramePlacement(surround, series?.frameDepthMm || series?.faceWidthMm || 70);
       win.installation.surround = surround;
+      setValue("installationSillHeight", win.installation?.sillHeightMm || 0);
       setChecked("surroundEnabled", surround.enabled);
       renderSelect("installationMountingMode", MOUNTING_MODE_OPTIONS.map(item => [item.value, item.label]), surround.mountingMode);
       renderSelect("installationFrameAlignment", FRAME_ALIGNMENT_OPTIONS.map(item => [item.value, item.label]), surround.frameAlignment);
@@ -3410,6 +4199,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const summary = surroundSummary(surround, win.widthMm, win.heightMm);
       document.getElementById("installationSummary").innerHTML = [
         ["包套状态", summary.enabled ? "已启用" : "未启用"],
+        ["台高", `${Math.round(win.installation?.sillHeightMm || 0)} mm`],
         ["安装方式", summary.mountingMode],
         ["框位", `${summary.frameAlignment} · ${placement.effectiveFrameOffsetMm >= 0 ? "+" : ""}${Math.round(placement.effectiveFrameOffsetMm)} mm`],
         ["样式", summary.style],
@@ -3690,6 +4480,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win || !surroundDesignDialog.draft) return;
       updateSurroundDialogDraftFromInputs();
       win.installation ||= { sillHeightMm: 0 };
+      const sillHeightMm = Math.max(0, Number(valueOf("installationSillHeight") || valueOf("sillHeight") || 0));
+      win.installation.sillHeightMm = sillHeightMm;
+      setValue("sillHeight", sillHeightMm);
       win.installation.surround = normalizeSurround({
         ...surroundDesignDialog.draft,
         enabled: true
@@ -4044,6 +4837,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       setValue("assemblyCornerAngle", assembly.cornerAngleDeg);
       setValue("assemblyCornerPostMode", assembly.cornerPostMode);
       setValue("assemblyPocketDepth", assembly.pocketDepthMm);
+      setValue("assemblyOpenPercent", assembly.openPercent ?? 80);
 
       const vertical = cell.type === "vertical_slide";
       renderSelect("assemblyPrimarySide", vertical
@@ -4075,7 +4869,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       setAssemblyFieldVisible("stackSide", ["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide", "corner_slide", "vertical_slide", "folding"].includes(cell.type));
       setAssemblyFieldVisible("primarySide", ["turn", "turn_tilt", "door", "vertical_slide"].includes(cell.type));
       setAssemblyFieldVisible("mullionMode", ["turn", "turn_tilt", "door"].includes(cell.type) && assembly.panelCount > 1);
-      setAssemblyFieldVisible("openPlane", cell.type === "folding");
+      setAssemblyFieldVisible("openPlane", ["turn", "door", "top_hung", "bottom_hung", "folding"].includes(cell.type));
+      setAssemblyFieldVisible("openPercent", true);
       setAssemblyFieldVisible("operationPriority", ["turn_tilt", "psk"].includes(cell.type));
       setAssemblyFieldVisible("ventilationMode", ["turn_tilt", "psk", "sliding", "lift_slide"].includes(cell.type));
       setAssemblyFieldVisible("trafficDoor", cell.type === "folding");
@@ -4161,35 +4956,225 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function cellCustomShapePath(cell, item) {
       const shape = normalizeCellCustomShape(cell?.customShape);
       if (!shape) return "";
-      return shape.points.map((point, index) => {
-        const px = item.x + point.x / 100 * item.w;
-        const py = item.y + point.y / 100 * item.h;
+      return cellCustomShapePoints(cell, item).map((point, index) => {
+        const px = point[0];
+        const py = point[1];
         return `${index ? "L" : "M"}${px} ${py}`;
       }).join(" ") + " Z";
+    }
+
+    function cellCustomShapePoints(cell, item) {
+      const shape = normalizeCellCustomShape(cell?.customShape);
+      if (!shape) return [];
+      return shape.points.map(point => {
+        const px = item.x + point.x / 100 * item.w;
+        const py = item.y + point.y / 100 * item.h;
+        return [px, py];
+      });
+    }
+
+    function bezierPoint(start, control, end, t) {
+      const inv = 1 - t;
+      return [
+        inv * inv * start[0] + 2 * inv * t * control[0] + t * t * end[0],
+        inv * inv * start[1] + 2 * inv * t * control[1] + t * t * end[1]
+      ];
+    }
+
+    function shapeAngleFor(win, type) {
+      return clampShapeAngle(type, normalizeWindowShape(win?.shape).shapeAngleDeg);
+    }
+
+    function shapeTrapezoidShift(width, height, angleDeg) {
+      const radians = Math.max(1, Math.min(89, Number(angleDeg || 83))) * Math.PI / 180;
+      return Math.min(width * 0.42, Math.max(0, height / Math.tan(radians)));
+    }
+
+    function shapePeakRise(width, height, angleDeg) {
+      const radians = Math.max(5, Math.min(75, Number(angleDeg || 34))) * Math.PI / 180;
+      return Math.min(height * 0.42, Math.max(0, width * 0.5 * Math.tan(radians)));
+    }
+
+    function shapeNotchSize(width, height, angleDeg, cap = Infinity) {
+      const radians = Math.max(5, Math.min(80, Number(angleDeg || 45))) * Math.PI / 180;
+      const notchX = Math.min(width * 0.28, cap);
+      const notchY = Math.min(height * 0.42, Math.max(width * 0.05, notchX * Math.tan(radians)));
+      return { x: notchX, y: notchY };
+    }
+
+    function windowOuterShapePoints(win, frame) {
+      if (!win || !frame) return [];
+      const shape = normalizeWindowShape(win.shape);
+      const type = shape.type || "rectangular";
+      const { x, y, w, h, face = 0 } = frame;
+      if (type === "rectangular" || w <= 0 || h <= 0) return [];
+      if (type === "arched") {
+        const rise = Math.min(h * 0.32, Math.max(face * 1.2, Number(shape.archHeightMm || 220) * (w / Math.max(1, win.widthMm))));
+        const start = [x, y + rise];
+        const control = [x + w / 2, y - rise * 0.75];
+        const end = [x + w, y + rise];
+        const arch = Array.from({ length: 17 }, (_, index) => bezierPoint(start, control, end, index / 16));
+        return [...arch, [x + w, y + h], [x, y + h]];
+      }
+      if (type === "trapezoid") {
+        const shift = shapeTrapezoidShift(w, h, shapeAngleFor(win, type));
+        return [[x + shift, y], [x + w, y], [x + w - shift, y + h], [x, y + h]];
+      }
+      if (type === "trapezoid_left") {
+        const shift = shapeTrapezoidShift(w, h, shapeAngleFor(win, type));
+        return [[x, y], [x + w - shift, y], [x + w, y + h], [x + shift, y + h]];
+      }
+      if (type === "trapezoid_peak") {
+        const peak = shapePeakRise(w, h, shapeAngleFor(win, type));
+        return [[x, y + peak], [x + w * 0.5, y], [x + w, y + peak], [x + w, y + h], [x, y + h]];
+      }
+      if (type === "notch_top_left") {
+        const notch = shapeNotchSize(w, h, shapeAngleFor(win, type), 130);
+        return [[x + notch.x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y + notch.y]];
+      }
+      if (type === "notch_top_right") {
+        const notch = shapeNotchSize(w, h, shapeAngleFor(win, type), 130);
+        return [[x, y], [x + w - notch.x, y], [x + w, y + notch.y], [x + w, y + h], [x, y + h]];
+      }
+      if (type === "custom_polygon") {
+        const points = normalizeShapePoints(shape.points).map(point => [x + point.x / 100 * w, y + point.y / 100 * h]);
+        return points.length >= 3 ? points : [];
+      }
+      return [];
+    }
+
+    function windowInnerShapePoints(win, frame) {
+      if (!win || !frame) return [];
+      const shape = normalizeWindowShape(win.shape);
+      const type = shape.type || "rectangular";
+      if (type === "rectangular") return [];
+      const { x, y, w, h, face } = frame;
+      const innerX = x + face;
+      const innerY = y + face;
+      const innerW = Math.max(0, w - face * 2);
+      const innerH = Math.max(0, h - face * 2);
+      if (innerW <= 0 || innerH <= 0) return [];
+      if (type === "arched") {
+        const rise = Math.min(h * 0.32, Math.max(face * 1.2, Number(shape.archHeightMm || 220) * (w / Math.max(1, win.widthMm))));
+        const start = [innerX, innerY + rise * 0.72];
+        const control = [x + w / 2, innerY - rise * 0.45];
+        const end = [innerX + innerW, innerY + rise * 0.72];
+        const arch = Array.from({ length: 17 }, (_, index) => bezierPoint(start, control, end, index / 16));
+        return [...arch, [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]];
+      }
+      if (type === "trapezoid") {
+        const shift = shapeTrapezoidShift(innerW, innerH, shapeAngleFor(win, type));
+        return [[innerX + shift, innerY], [innerX + innerW, innerY], [innerX + innerW - shift, innerY + innerH], [innerX, innerY + innerH]];
+      }
+      if (type === "trapezoid_left") {
+        const shift = shapeTrapezoidShift(innerW, innerH, shapeAngleFor(win, type));
+        return [[innerX, innerY], [innerX + innerW - shift, innerY], [innerX + innerW, innerY + innerH], [innerX + shift, innerY + innerH]];
+      }
+      if (type === "trapezoid_peak") {
+        const peak = shapePeakRise(innerW, innerH, shapeAngleFor(win, type));
+        return [[innerX, innerY + peak], [x + w * 0.5, innerY], [innerX + innerW, innerY + peak], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]];
+      }
+      if (type === "notch_top_left") {
+        const notch = shapeNotchSize(innerW, innerH, shapeAngleFor(win, type), 130 * innerW / Math.max(1, w));
+        return [[innerX + notch.x, innerY], [innerX + innerW, innerY], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH], [innerX, innerY + notch.y]];
+      }
+      if (type === "notch_top_right") {
+        const notch = shapeNotchSize(innerW, innerH, shapeAngleFor(win, type), 130 * innerW / Math.max(1, w));
+        return [[innerX, innerY], [innerX + innerW - notch.x, innerY], [innerX + innerW, innerY + notch.y], [innerX + innerW, innerY + innerH], [innerX, innerY + innerH]];
+      }
+      if (type === "custom_polygon") {
+        const outer = normalizeShapePoints(shape.points).map(point => [x + point.x / 100 * w, y + point.y / 100 * h]);
+        const inner = insetPolygonTowardCentroid(outer, Math.min(face, w * 0.18, h * 0.18));
+        return inner.length >= 3 ? inner : [];
+      }
+      return [];
+    }
+
+    function resolveCellShapeGeometry(win, item, frame) {
+      const customPoints = cellCustomShapePoints(item.cell, item);
+      if (customPoints.length >= 3) {
+        return { points: customPoints, path: polygonPath(customPoints) };
+      }
+      const singleCell = win?.layout?.columns?.length === 1 && win?.layout?.rows?.length === 1;
+      const shapePoints = singleCell ? windowInnerShapePoints(win, frame) : [];
+      if (shapePoints.length >= 3) {
+        return { points: shapePoints, path: polygonPath(shapePoints) };
+      }
+      return { points: [], path: "" };
+    }
+
+    function windowInnerFillPath(win, frame) {
+      const points = windowInnerShapePoints(win, frame);
+      return points.length >= 3 ? polygonPath(points) : "";
+    }
+
+    function cellRenderItemWithShape(win, item, frame) {
+      const geometry = resolveCellShapeGeometry(win, item, frame);
+      return geometry.points.length >= 3
+        ? { ...item, shapePoints: geometry.points, shapePath: geometry.path }
+        : item;
+    }
+
+    function projectMarkupPointForOpenSash(cell, item, scale, markup) {
+      if (!project.viewOptions?.showOpenState) return null;
+      if (!["turn", "turn_tilt", "door"].includes(cell?.type)) return null;
+      if (cell.openingAssembly?.panelCount > 1) return null;
+      const geometry = sideHungSashGeometry(cell, item, scale);
+      const { leftTop, rightTop, leftBottom, rightBottom, leftHinged } = geometry;
+      const u = markup.kind === "lock"
+        ? (leftHinged ? 1 : 0)
+        : Math.max(0, Math.min(1, Number(markup.xPercent || 0) / 100));
+      const v = Math.max(0, Math.min(1, Number(markup.yPercent || 0) / 100));
+      const topX = leftTop[0] + (rightTop[0] - leftTop[0]) * u;
+      const topY = leftTop[1] + (rightTop[1] - leftTop[1]) * u;
+      const bottomX = leftBottom[0] + (rightBottom[0] - leftBottom[0]) * u;
+      const bottomY = leftBottom[1] + (rightBottom[1] - leftBottom[1]) * u;
+      return {
+        x: topX + (bottomX - topX) * v,
+        y: topY + (bottomY - topY) * v
+      };
+    }
+
+    function renderTextMarkup(markup, cx, cy, common) {
+      const text = escapeHtml(markup.text || "文字标注");
+      const width = Math.max(64, text.length * 11 + 20);
+      return `<g ${common} aria-label="文字标注，双击编辑，拖动调整位置">
+        <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - 14}" width="${width}" height="28" rx="2" />
+        <text class="cell-markup-text" x="${cx}" y="${cy + 4}">${text}</text>
+      </g>`;
+    }
+
+    function renderWindowRootMarkups(win, frame, scale) {
+      const markups = normalizeWindowMarkups(win?.markups);
+      if (!markups.length || !frame) return "";
+      const content = markups.map(markup => {
+        const cx = frame.x + frame.w * Number(markup.xPercent || 0) / 100;
+        const cy = frame.y + frame.h * Number(markup.yPercent || 0) / 100;
+        const common = `class="cell-markup root-markup text ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-markup-host="window" data-window-id="${escapeHtml(win.windowId || "")}" data-root-x="${frame.x}" data-root-y="${frame.y}" data-root-w="${frame.w}" data-root-h="${frame.h}" tabindex="0" role="button"`;
+        return renderTextMarkup(markup, cx, cy, common);
+      }).join("");
+      return `<g class="markup-layer root-markup-layer" data-window-id="${escapeHtml(win.windowId || "")}">${content}</g>`;
     }
 
     function renderCellMarkups(cell, item, scale) {
       const markups = normalizeCellMarkups(cell?.markups);
       if (!markups.length) return "";
       return markups.map(markup => {
-        const cx = item.x + item.w * markup.xPercent / 100;
-        const cy = item.y + item.h * markup.yPercent / 100;
-        const common = `class="cell-markup ${markup.kind} ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-window-id="${escapeHtml(item.windowId || "")}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0" role="button"`;
+        const projected = projectMarkupPointForOpenSash(cell, item, scale, markup);
+        const cx = projected?.x ?? item.x + item.w * markup.xPercent / 100;
+        const cy = projected?.y ?? item.y + item.h * markup.yPercent / 100;
+        const common = `class="cell-markup ${markup.kind} ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-markup-host="cell" data-window-id="${escapeHtml(item.windowId || "")}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0" role="button"`;
         if (markup.kind === "text") {
-          const text = escapeHtml(markup.text || "文字标注");
-          const width = Math.max(64, text.length * 11 + 20);
-          return `<g ${common} aria-label="文字标注，双击编辑，拖动调整位置">
-            <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - 14}" width="${width}" height="28" rx="2" />
-            <text class="cell-markup-text" x="${cx}" y="${cy + 4}">${text}</text>
-          </g>`;
+          return renderTextMarkup(markup, cx, cy, common);
         }
         if (markup.kind === "lock") {
           const lockW = Math.max(14, markup.sizeMm * scale * 0.55);
           const lockH = Math.max(22, markup.sizeMm * scale);
+          const lockHandleDirection = String(cell?.opening || "").startsWith("right") ? -1 : 1;
           return `<g ${common} aria-label="锁具，双击编辑尺寸和定位">
             <rect class="cell-lock-body" x="${cx - lockW / 2}" y="${cy - lockH / 2}" width="${lockW}" height="${lockH}" rx="2" />
             <circle class="cell-lock-cylinder" cx="${cx}" cy="${cy - lockH * 0.14}" r="${Math.max(2.5, lockW * 0.16)}" />
-            <line class="cell-lock-handle" x1="${cx}" y1="${cy + lockH * 0.08}" x2="${cx + lockW * 0.65}" y2="${cy + lockH * 0.08}" />
+            <line class="cell-lock-handle" x1="${cx}" y1="${cy + lockH * 0.08}" x2="${cx + lockHandleDirection * lockW * 0.65}" y2="${cy + lockH * 0.08}" />
           </g>`;
         }
         const sizePx = Math.max(8, markup.sizeMm * scale);
@@ -4221,27 +5206,40 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return `<g id="markupLayer" class="markup-layer">${content}</g>`;
     }
 
-    function renderAssemblyWindowCells(win, inner, scale, outlineColor) {
+    function renderAssemblyWindowCells(win, inner, scale, outlineColor, options = {}) {
+      const frameInfo = options.frameInfo || null;
+      const foregroundOpenCells = options.foregroundOpenCells || null;
       const rects = computeCellRects(win, inner).map(item => ({
         ...item,
         windowId: win.windowId
       }));
       const parts = [];
+      const renderRects = [];
       for (const item of rects) {
         const cell = item.cell;
+        const renderItem = cellRenderItemWithShape(win, item, frameInfo);
+        renderRects.push(renderItem);
         const selected = win.windowId === selectedWindowId
           && item.row === selectedCell.row
           && item.col === selectedCell.col
           && !selectedMarkupId && !selectedJointId && activeInspectorTab === "cell";
         const commandClass = ["apply_cell_preset", "add_cell_markup"].includes(canvasCommand.mode) ? " cell-placement-target" : "";
         parts.push(`<g class="cell assembly-cell${commandClass}" data-window-id="${escapeHtml(win.windowId)}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0" role="button">`);
-        parts.push(`<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${cellFill(cell)}" stroke="#708493" stroke-width="1.1" />`);
+        const baseFill = project.viewOptions?.showOpenState && isOperableType(cell.type) ? "rgba(248, 251, 252, 0.72)" : cellFill(cell);
+        if (renderItem.shapePath) {
+          parts.push(`<path d="${renderItem.shapePath}" fill="${baseFill}" stroke="#708493" stroke-width="1.1" />`);
+        } else {
+          parts.push(`<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${baseFill}" stroke="#708493" stroke-width="1.1" />`);
+        }
         if (isOperableType(cell.type)) {
           const frameColor = project.viewOptions?.showProfileColor ? profileColor(win.colorInside, currentSeries(win).material) : "#7e8792";
-          const inset = Math.min(item.w, item.h) * 0.12;
-          parts.push(project.viewOptions?.showOpenState
-            ? openCellElevation(cell, item, outlineColor, frameColor, scale)
-            : `<rect x="${item.x + inset}" y="${item.y + inset}" width="${Math.max(0, item.w - inset * 2)}" height="${Math.max(0, item.h - inset * 2)}" fill="none" stroke="${outlineColor}" stroke-width="5" />${openingSymbol(cell, item, inset)}`);
+          if (project.viewOptions?.showOpenState) {
+            const openElevation = openCellElevation(cell, renderItem, outlineColor, frameColor, scale);
+            if (foregroundOpenCells && renderOpenCellAboveFrame(cell)) foregroundOpenCells.push(openElevation);
+            else parts.push(openElevation);
+          } else {
+            parts.push(closedCellElevation(cell, renderItem, outlineColor, frameColor, scale));
+          }
         }
         parts.push(cellDecoration(cell, item, outlineColor));
         parts.push(integratedScreenDecoration(cell, item, outlineColor));
@@ -4251,7 +5249,38 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         }
         parts.push("</g>");
       }
-      parts.push(`<g class="markup-layer assembly-markup-layer">${rects.map(item => renderCellMarkups(item.cell, item, scale)).join("")}</g>`);
+      if (options.includeMarkups !== false) {
+        parts.push(`<g class="markup-layer assembly-markup-layer">${renderRects.map(item => renderCellMarkups(item.cell, item, scale)).join("")}</g>`);
+      }
+      return parts.join("");
+    }
+
+    function renderThroughMullions(win, colEdges, rowEdges, face, fillColor, outlineColor) {
+      const parts = [];
+      for (let c = 1; c < colEdges.length - 1; c += 1) {
+        for (let r = 0; r < win.layout.rows.length; r += 1) {
+          if (cellHasCustomShape(win, r, c - 1) || cellHasCustomShape(win, r, c)) continue;
+          const dividerX = colEdges[c] - face / 2;
+          const dividerY = rowEdges[r];
+          const dividerW = face;
+          const dividerH = rowEdges[r + 1] - rowEdges[r];
+          parts.push(`<rect class="through-mullion-profile" x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
+        }
+      }
+      for (let r = 1; r < rowEdges.length - 1; r += 1) {
+        const aboveRow = r - 1;
+        const belowRow = r;
+        for (let c = 0; c < win.layout.columns.length; c += 1) {
+          if (cellHasCustomShape(win, aboveRow, c) || cellHasCustomShape(win, belowRow, c)) continue;
+          const dividerX = colEdges[c];
+          const dividerY = rowEdges[r] - face / 2;
+          const dividerW = colEdges[c + 1] - colEdges[c];
+          const dividerH = face;
+          parts.push(`<rect class="through-mullion-profile" x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
+          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
+        }
+      }
       return parts.join("");
     }
 
@@ -4259,6 +5288,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const svg = document.getElementById("windowSvg");
       const win = currentWindow();
       if (!win) {
+        canvasRootMarkupFrames = [];
         const view = { w: 900, h: 620 };
         svg.setAttribute("viewBox", `0 0 ${view.w} ${view.h}`);
         document.getElementById("drawingTitle").textContent = "空画布";
@@ -4310,12 +5340,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const options = project.viewOptions;
       const view = { w: 900, h: options.showPlanView ? 760 : 620 };
       const elevationHeight = options.showPlanView ? 500 : view.h;
-      const margin = { x: 90, y: 72 };
+      const margin = { x: 90, y: options.showOpenState ? 108 : 72 };
       const scale = Math.min((view.w - margin.x * 2) / win.widthMm, (elevationHeight - margin.y * 2) / win.heightMm);
       const drawW = win.widthMm * scale;
       const drawH = win.heightMm * scale;
       const x = (view.w - drawW) / 2;
       const y = (elevationHeight - drawH) / 2 + (options.showPlanView ? 0 : 10);
+      canvasRootMarkupFrames = [{ windowId: win.windowId, x, y, w: drawW, h: drawH }];
       const series = currentSeries(win);
       const face = Math.max(10, Number(series.faceWidthMm || 70) * scale);
       const inner = { x: x + face, y: y + face, w: drawW - 2 * face, h: drawH - 2 * face };
@@ -4336,45 +5367,57 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const parts = [];
 
       parts.push(svgPlanDefs());
-      parts.push(`<text class="window-mark" x="${view.w / 2}" y="${Math.max(18, y - 38)}">${escapeHtml(win.mark)}</text>`);
+      parts.push(`<text class="window-mark" x="${view.w / 2}" y="${Math.max(18, y - (options.showOpenState ? 102 : 38))}">${escapeHtml(win.mark)}</text>`);
       parts.push(renderSurroundElevation(win, x, y, drawW, drawH, scale));
       parts.push(`<path d="${framePath}" fill="${frameColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="2" />`);
-      parts.push(renderProfileBevel(x, y, drawW, drawH, face));
-      parts.push(`<rect x="${inner.x}" y="${inner.y}" width="${inner.w}" height="${inner.h}" fill="#f8fbfc" />`);
+      const frameInfo = { x, y, w: drawW, h: drawH, face };
+      const innerFillPath = windowInnerFillPath(win, frameInfo);
+      parts.push(renderProfileBevel(x, y, drawW, drawH, face, win));
+      parts.push(innerFillPath
+        ? `<path class="window-inner-fill" d="${innerFillPath}" fill="#f8fbfc" />`
+        : `<rect class="window-inner-fill" x="${inner.x}" y="${inner.y}" width="${inner.w}" height="${inner.h}" fill="#f8fbfc" />`);
+      const foregroundOpenCells = [];
+      const renderRects = [];
 
       for (let i = 0; i < rects.length; i += 1) {
         const item = rects[i];
         const cell = item.cell;
+        const renderItem = cellRenderItemWithShape(win, item, frameInfo);
+        renderRects.push(renderItem);
         const selected = item.row === selectedCell.row && item.col === selectedCell.col;
-        const fill = cellFill(cell);
         const openable = isOperableType(cell.type);
-        const cellPath = cellCustomShapePath(cell, item);
+        const fill = options.showOpenState && openable ? "rgba(248, 251, 252, 0.72)" : cellFill(cell);
+        const cellPath = renderItem.shapePath || "";
         const clipId = cellPath ? `cellClip-${item.row}-${item.col}` : "";
+        const useCellClip = Boolean(cellPath && !(options.showOpenState && openable));
         const cellCommandClass = ["apply_cell_preset", "add_cell_markup"].includes(canvasCommand.mode) ? " cell-placement-target" : "";
         parts.push(`<g class="cell${cellCommandClass}" data-window-id="${escapeHtml(win.windowId)}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0">`);
         if (cellPath) {
           parts.push(`<defs><clipPath id="${clipId}"><path d="${cellPath}" /></clipPath></defs>`);
           parts.push(`<path d="${cellPath}" fill="${fill}" stroke="${cell.type === "empty" ? "#b8c3c6" : "#5a747b"}" stroke-width="1.6" />`);
-          parts.push(`<text class="shape-angle-label" x="${item.x + item.w / 2}" y="${item.y + 16}">${escapeHtml(cell.customShape.name)}</text>`);
+          const customShape = normalizeCellCustomShape(cell.customShape);
+          if (customShape?.name) {
+            parts.push(`<text class="shape-angle-label" x="${item.x + item.w / 2}" y="${item.y + 16}">${escapeHtml(customShape.name)}</text>`);
+          }
         } else {
           parts.push(`<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${fill}" stroke="${cell.type === "empty" ? "#b8c3c6" : "#5a747b"}" stroke-width="1.2" />`);
         }
-        if (cellPath) parts.push(`<g clip-path="url(#${clipId})">`);
+        if (useCellClip) parts.push(`<g clip-path="url(#${clipId})">`);
         if (openable) {
-          const inset = Math.min(item.w, item.h) * 0.12;
           if (options.showOpenState) {
-            parts.push(openCellElevation(cell, item, outlineColor, frameColor, scale));
+            const openElevation = openCellElevation(cell, renderItem, outlineColor, frameColor, scale);
+            if (renderOpenCellAboveFrame(cell)) foregroundOpenCells.push(openElevation);
+            else parts.push(openElevation);
           } else {
-            parts.push(`<rect x="${item.x + inset}" y="${item.y + inset}" width="${Math.max(0, item.w - inset * 2)}" height="${Math.max(0, item.h - inset * 2)}" fill="none" stroke="${outlineColor}" stroke-width="5" />`);
-            parts.push(openingSymbol(cell, item, inset));
+            parts.push(closedCellElevation(cell, renderItem, outlineColor, frameColor, scale));
           }
         }
         parts.push(cellDecoration(cell, item, outlineColor));
         parts.push(integratedScreenDecoration(cell, item, outlineColor));
-        if (cellPath) parts.push(`</g>`);
+        if (useCellClip) parts.push(`</g>`);
         parts.push(`<text class="cell-label" x="${item.x + item.w / 2}" y="${item.y + item.h / 2}">${escapeHtml(cellDrawingCode(cell.type, i))}</text>`);
         if (selected && openable && options.showDimensions) {
-          parts.push(handleHeightDimension(cell, item, scale));
+          parts.push(handleHeightDimension(cell, renderItem, scale));
         }
         if (selected) {
           parts.push(cellPath
@@ -4387,37 +5430,19 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const dividerColor = frameColor;
       const colEdges = rectsToEdges(win.layout.columns, inner.x, inner.w);
       const rowEdges = rectsToEdges(win.layout.rows, inner.y, inner.h);
-      for (let c = 1; c < colEdges.length - 1; c += 1) {
-        for (let r = 0; r < win.layout.rows.length; r += 1) {
-          if (cellHasCustomShape(win, r, c - 1) || cellHasCustomShape(win, r, c)) continue;
-          const bottom = rowEdges[r];
-          const top = rowEdges[r + 1];
-          const dividerX = colEdges[c] - face / 2;
-          const dividerY = bottom;
-          const dividerW = face;
-          const dividerH = top - bottom;
-          parts.push(`<rect x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
-          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
-        }
-      }
-      for (let r = 1; r < rowEdges.length - 1; r += 1) {
-        const aboveRow = r - 1;
-        const belowRow = r;
-        for (let c = 0; c < win.layout.columns.length; c += 1) {
-          if (cellHasCustomShape(win, aboveRow, c) || cellHasCustomShape(win, belowRow, c)) continue;
-          const dividerX = colEdges[c];
-          const dividerY = rowEdges[r] - face / 2;
-          const dividerW = colEdges[c + 1] - colEdges[c];
-          const dividerH = face;
-          parts.push(`<rect x="${dividerX}" y="${dividerY}" width="${dividerW}" height="${dividerH}" fill="${dividerColor}" stroke="${outlineColor}" stroke-width="1.5" />`);
-          parts.push(renderProfileDividerBevel(dividerX, dividerY, dividerW, dividerH));
-        }
-      }
+      parts.push(renderThroughMullions(win, colEdges, rowEdges, face, dividerColor, outlineColor));
 
       parts.push(renderTopologyMembers(win, rects, face, dividerColor, outlineColor));
+      if (options.showOpenState) {
+        parts.push(renderWindowFrameOcclusion(win, x, y, drawW, drawH, face, frameColor, outlineColor));
+        if (foregroundOpenCells.length) {
+          parts.push(`<g class="open-sash-foreground-layer">${foregroundOpenCells.join("")}</g>`);
+        }
+      }
       parts.push(renderEngineeringJoints(win, x, y, drawW, drawH));
       parts.push(renderCanvasCommandZones(win, x, y, drawW, drawH));
-      parts.push(renderMarkupLayer(rects, scale));
+      parts.push(renderMarkupLayer(renderRects, scale));
+      parts.push(renderWindowRootMarkups(win, { x, y, w: drawW, h: drawH }, scale));
       parts.push(renderWindowGeometryHandles(win, x, y, drawW, drawH, inner, scale, colEdges, rowEdges));
       parts.push(`<g id="markupPreviewLayer" class="markup-preview-layer"></g>`);
 
@@ -4426,13 +5451,16 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const rowTotal = sum(win.layout.rows);
         const dimensionColEdges = rectsToEdges(win.layout.columns, x, drawW, colTotal);
         const dimensionRowEdges = rectsToEdges(win.layout.rows, y, drawH, rowTotal);
+        const shape = normalizeWindowShape(win.shape);
+        const topDimensionOffset = options.showOpenState ? (shape.type === "arched" ? 108 : 92) : 22;
+        const rightDimensionOffset = options.showOpenState ? 36 : 22;
         for (let c = 0; c < win.layout.columns.length; c += 1) {
           const widthMm = win.widthMm * win.layout.columns[c] / colTotal;
-          parts.push(dimensionLine(dimensionColEdges[c], y - 22, dimensionColEdges[c + 1], y - 22, `${Math.round(widthMm)}`));
+          parts.push(dimensionLine(dimensionColEdges[c], y - topDimensionOffset, dimensionColEdges[c + 1], y - topDimensionOffset, sizeRatioLabel(widthMm, win.layout.columns[c], colTotal)));
         }
         for (let r = 0; r < win.layout.rows.length; r += 1) {
           const heightMm = win.heightMm * win.layout.rows[r] / rowTotal;
-          parts.push(dimensionLine(x + drawW + 22, dimensionRowEdges[r], x + drawW + 22, dimensionRowEdges[r + 1], `${Math.round(heightMm)}`, true));
+          parts.push(dimensionLine(x + drawW + rightDimensionOffset, dimensionRowEdges[r], x + drawW + rightDimensionOffset, dimensionRowEdges[r + 1], sizeRatioLabel(heightMm, win.layout.rows[r], rowTotal), true));
         }
         parts.push(dimensionLine(x, y + drawH + 34, x + drawW, y + drawH + 34, `${Math.round(win.widthMm)} mm`, false, "windowWidth"));
         parts.push(dimensionLine(x + drawW + 52, y, x + drawW + 52, y + drawH, `${Math.round(win.heightMm)} mm`, true, "windowHeight"));
@@ -4446,6 +5474,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       setCanvasSvgContent(svg, parts);
       bindCanvasMarkupPlacement(svg);
       bindCanvasGeometryDrag(svg);
+      bindCanvasMarkupContextMenus(svg);
       svg.querySelectorAll(".cell").forEach(g => {
         g.addEventListener("click", event => {
           const row = Number(g.dataset.row);
@@ -4453,6 +5482,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           selectedMemberId = "";
           selectedJointId = "";
           selectedMarkupId = "";
+          clearDividerSelection();
           selectedCell = { row, col };
           if (canvasCommand.mode === "apply_cell_preset" && canvasCommand.cellPreset) {
             event.preventDefault();
@@ -4481,6 +5511,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           selectedMemberId = "";
           selectedJointId = "";
           selectedMarkupId = "";
+          clearDividerSelection();
           selectedCell = { row, col };
           switchInspector("cell");
           render();
@@ -4491,6 +5522,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             selectedMemberId = "";
             selectedJointId = "";
             selectedMarkupId = "";
+            clearDividerSelection();
             selectedCell = { row: Number(g.dataset.row), col: Number(g.dataset.col) };
             switchInspector("cell");
             render();
@@ -4501,12 +5533,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       svg.querySelectorAll(".cell-markup").forEach(group => {
         group.addEventListener("click", event => {
           event.stopPropagation();
-          selectedMarkupId = group.dataset.markupId || "";
-          selectedCell = { row: Number(group.dataset.row), col: Number(group.dataset.col) };
-          switchInspector("cell");
+          selectMarkupObject(group.dataset.markupId || "");
           renderObjectTree();
           renderSelectedObjectProperties();
         });
+        group.addEventListener("contextmenu", event => openMarkupContextMenuFromGroup(group, event));
         group.addEventListener("dblclick", event => {
           event.preventDefault();
           event.stopPropagation();
@@ -4546,6 +5577,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           selectedJointId = "";
           selectedMemberId = member.memberId;
           selectedMarkupId = "";
+          clearDividerSelection();
           selectedCell = { row: host.row, col: host.col };
           switchInspector("member");
           render();
@@ -4560,6 +5592,52 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           select();
           showMemberContextMenu(event, group.dataset.memberId);
         });
+        group.addEventListener("dblclick", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const member = win.topology.members.find(item => item.memberId === group.dataset.memberId);
+          if (!member) return;
+          select();
+          openCanvasDimensionEditor(localMemberPositionTarget(member.memberId), event);
+        });
+        group.addEventListener("pointerdown", event => {
+          if (event.button !== 0 || canvasCommand.mode) return;
+          const member = win.topology.members.find(item => item.memberId === group.dataset.memberId);
+          const host = findMemberHost(win.layout, member);
+          if (!member || !host) return;
+          event.preventDefault();
+          event.stopPropagation();
+          select();
+          const point = canvasPointFromMouse(svg, event);
+          geometryDrag = {
+            pointerId: event.pointerId,
+            windowId: win.windowId,
+            kind: "localMember",
+            memberId: member.memberId,
+            axis: member.orientation === "horizontal" ? "row" : "column",
+            startPoint: point,
+            startPositionRatio: member.positionRatio,
+            hostWidth: Math.max(1, Number(group.dataset.memberHostW || 1)),
+            hostHeight: Math.max(1, Number(group.dataset.memberHostH || 1)),
+            changed: false,
+            moved: false
+          };
+          const move = moveEvent => updateGeometryDrag(svg, moveEvent);
+          const up = upEvent => {
+            finishGeometryDrag(svg, upEvent);
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          geometryDrag.cleanup = () => {
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          document.addEventListener("pointermove", move, true);
+          document.addEventListener("pointerup", up, true);
+          document.addEventListener("pointercancel", up, true);
+        });
         group.addEventListener("keydown", event => {
           if (event.key === "Enter" || event.key === " ") select();
         });
@@ -4571,6 +5649,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           selectedMemberId = "";
           selectedJointId = joint.jointId;
           selectedMarkupId = "";
+          clearDividerSelection();
           switchInspector("joint");
           render();
         };
@@ -4637,6 +5716,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function renderWindowGeometryHandles(win, x, y, width, height, inner, scale, colEdges, rowEdges) {
       if (canvasCommand.mode) return "";
+      const handleFace = Math.max(10, Number(currentSeries(win).faceWidthMm || 70) * scale);
       const attrs = `data-geometry-window="${escapeHtml(win.windowId)}" data-unit-scale="${scale}"`;
       const parts = [`<g class="geometry-drag-layer" aria-label="拖动调整窗体尺寸和中梃比例">`];
       parts.push(`<g class="geometry-drag-handle window-width-handle" ${attrs} data-geometry-kind="window" data-geometry-axis="width" tabindex="0">
@@ -4648,13 +5728,19 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         <circle cx="${x + width / 2}" cy="${y + height}" r="7" />
       </g>`);
       for (let index = 1; index < colEdges.length - 1; index += 1) {
-        parts.push(`<g class="geometry-drag-handle mullion-drag-handle" ${attrs} data-geometry-kind="divider" data-geometry-axis="column" data-geometry-index="${index - 1}" tabindex="0">
+        const dividerIndex = index - 1;
+        const selected = selectedDividerMatches(win, "column", dividerIndex);
+        parts.push(`<g class="geometry-drag-handle mullion-drag-handle ${selected ? "selected" : ""}" ${attrs} data-geometry-kind="divider" data-geometry-axis="column" data-geometry-index="${dividerIndex}" tabindex="0" aria-label="${escapeHtml(throughDividerLabel("column", dividerIndex))}">
+          <rect class="geometry-drag-hit" x="${colEdges[index] - Math.max(10, handleFace * 0.7)}" y="${inner.y}" width="${Math.max(20, handleFace * 1.4)}" height="${inner.h}" />
           <line x1="${colEdges[index]}" y1="${inner.y}" x2="${colEdges[index]}" y2="${inner.y + inner.h}" />
           <circle cx="${colEdges[index]}" cy="${inner.y + 12}" r="6" />
         </g>`);
       }
       for (let index = 1; index < rowEdges.length - 1; index += 1) {
-        parts.push(`<g class="geometry-drag-handle mullion-drag-handle" ${attrs} data-geometry-kind="divider" data-geometry-axis="row" data-geometry-index="${index - 1}" tabindex="0">
+        const dividerIndex = index - 1;
+        const selected = selectedDividerMatches(win, "row", dividerIndex);
+        parts.push(`<g class="geometry-drag-handle mullion-drag-handle ${selected ? "selected" : ""}" ${attrs} data-geometry-kind="divider" data-geometry-axis="row" data-geometry-index="${dividerIndex}" tabindex="0" aria-label="${escapeHtml(throughDividerLabel("row", dividerIndex))}">
+          <rect class="geometry-drag-hit" x="${inner.x}" y="${rowEdges[index] - Math.max(10, handleFace * 0.7)}" width="${inner.w}" height="${Math.max(20, handleFace * 1.4)}" />
           <line x1="${inner.x}" y1="${rowEdges[index]}" x2="${inner.x + inner.w}" y2="${rowEdges[index]}" />
           <circle cx="${inner.x + 12}" cy="${rowEdges[index]}" r="6" />
         </g>`);
@@ -4665,12 +5751,57 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function bindCanvasGeometryDrag(svg) {
       svg.querySelectorAll(".geometry-drag-handle").forEach(handle => {
+        handle.addEventListener("click", event => {
+          if (canvasCommand.mode) return;
+          const win = project.windows.find(item => item.windowId === handle.dataset.geometryWindow);
+          if (!win) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (handle.dataset.geometryKind === "divider") {
+            selectThroughDivider(win, handle.dataset.geometryAxis, Number(handle.dataset.geometryIndex || 0));
+            render();
+          } else {
+            clearDividerSelection();
+          }
+        });
+        handle.addEventListener("dblclick", event => {
+          if (canvasCommand.mode || handle.dataset.geometryKind !== "divider") return;
+          const win = project.windows.find(item => item.windowId === handle.dataset.geometryWindow);
+          if (!win) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const axis = handle.dataset.geometryAxis;
+          const index = Number(handle.dataset.geometryIndex || 0);
+          selectThroughDivider(win, axis, index);
+          openCanvasDimensionEditor(throughDividerTarget(axis, index), event);
+        });
+        handle.addEventListener("contextmenu", event => {
+          if (canvasCommand.mode || handle.dataset.geometryKind !== "divider") return;
+          const win = project.windows.find(item => item.windowId === handle.dataset.geometryWindow);
+          if (!win) return;
+          event.preventDefault();
+          event.stopPropagation();
+          hideCellContextMenu();
+          hideJointContextMenu();
+          hideAssemblyContextMenu();
+          selectThroughDivider(win, handle.dataset.geometryAxis, Number(handle.dataset.geometryIndex || 0));
+          render();
+          showThroughDividerContextMenu(event);
+        });
         handle.addEventListener("pointerdown", event => {
           if (event.button !== 0 || canvasCommand.mode) return;
           const win = project.windows.find(item => item.windowId === handle.dataset.geometryWindow);
           if (!win) return;
           event.preventDefault();
           event.stopPropagation();
+          if (handle.dataset.geometryKind === "divider") {
+            selectThroughDivider(win, handle.dataset.geometryAxis, Number(handle.dataset.geometryIndex || 0));
+          } else {
+            selectedMemberId = "";
+            selectedJointId = "";
+            selectedMarkupId = "";
+            clearDividerSelection();
+          }
           const point = canvasPointFromMouse(svg, event);
           geometryDrag = {
             pointerId: event.pointerId,
@@ -4725,9 +5856,32 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sizes[index + 1] = pairTotal - sizes[index];
         if (drag.axis === "column") win.layout.columns = sizes;
         else win.layout.rows = sizes;
+        selectThroughDivider(win, drag.axis, index);
       }
       selectedWindowId = win.windowId;
       selectedPlacementId = currentProjectAssembly()?.placements?.find(item => item.windowId === win.windowId)?.placementId || "";
+      return true;
+    }
+
+    function applyLocalMemberDragDelta(drag, dx, dy) {
+      const win = project.windows.find(item => item.windowId === drag.windowId);
+      const member = win?.topology?.members?.find(item => item.memberId === drag.memberId);
+      if (!win || !member) return false;
+      const host = findMemberHost(win.layout, member);
+      if (!host) return false;
+      const delta = member.orientation === "horizontal"
+        ? dy / Math.max(1, drag.hostHeight)
+        : dx / Math.max(1, drag.hostWidth);
+      const next = Math.max(0.08, Math.min(0.92, Number(drag.startPositionRatio || 0.5) + delta));
+      member.positionRatio = next;
+      selectedWindowId = win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(item => item.windowId === win.windowId)?.placementId || "";
+      selectedCell = { row: host.row, col: host.col };
+      selectedMemberId = member.memberId;
+      selectedJointId = "";
+      selectedMarkupId = "";
+      clearDividerSelection();
+      switchInspector("member");
       return true;
     }
 
@@ -4741,7 +5895,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       geometryDrag.moved ||= Math.hypot(dx, dy) > 2;
       if (!geometryDrag.moved) return;
       const deltaPx = geometryDrag.axis === "height" || geometryDrag.axis === "row" ? dy : dx;
-      const changed = applyGeometryDragDelta(geometryDrag, deltaPx / geometryDrag.unitScale);
+      const changed = geometryDrag.kind === "localMember"
+        ? applyLocalMemberDragDelta(geometryDrag, dx, dy)
+        : applyGeometryDragDelta(geometryDrag, deltaPx / geometryDrag.unitScale);
       if (!changed) return;
       geometryDrag.changed = true;
       render();
@@ -4756,7 +5912,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       geometryDrag = null;
       if (!drag.moved || !drag.changed) return;
       markDirty();
-      showToast(drag.kind === "window" ? "窗框尺寸已更新。" : "中梃分格比例已更新。");
+      showToast(drag.kind === "window"
+        ? "窗框尺寸已更新。"
+        : drag.kind === "localMember"
+          ? "局部中梃位置已更新。"
+          : "贯通中梃位置已更新。");
     }
 
     function updateCanvasViewportTransform() {
@@ -4792,6 +5952,59 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return { xPercent, yPercent, offsetXPercent: xPercent - 50, offsetYPercent: yPercent - 50 };
     }
 
+    function rootMarkupPositionFromEvent(frame, event) {
+      const svg = document.getElementById("windowSvg");
+      const point = canvasPointFromMouse(svg, event);
+      const x = Number(frame?.x ?? frame?.rootX ?? frame?.dataset?.rootX ?? 0);
+      const y = Number(frame?.y ?? frame?.rootY ?? frame?.dataset?.rootY ?? 0);
+      const w = Math.max(1, Number(frame?.w ?? frame?.rootW ?? frame?.dataset?.rootW ?? 1));
+      const h = Math.max(1, Number(frame?.h ?? frame?.rootH ?? frame?.dataset?.rootH ?? 1));
+      const xPercent = Math.max(-100, Math.min(200, (point.x - x) / w * 100));
+      const yPercent = Math.max(-100, Math.min(200, (point.y - y) / h * 100));
+      return { xPercent, yPercent, offsetXPercent: xPercent - 50, offsetYPercent: yPercent - 50 };
+    }
+
+    function rootMarkupFrameForWindow(windowId) {
+      return canvasRootMarkupFrames.find(frame => frame.windowId === windowId) || canvasRootMarkupFrames[0] || null;
+    }
+
+    function findRootMarkupFrameFromEvent(svg, event) {
+      const point = canvasPointFromMouse(svg, event);
+      const hitPadding = 140;
+      const containing = canvasRootMarkupFrames.find(frame => (
+        point.x >= frame.x - hitPadding
+        && point.x <= frame.x + frame.w + hitPadding
+        && point.y >= frame.y - hitPadding
+        && point.y <= frame.y + frame.h + hitPadding
+      ));
+      if (containing) return containing;
+      return rootMarkupFrameForWindow(selectedWindowId);
+    }
+
+    function startRootTextMarkupPlacement() {
+      const win = currentWindow();
+      if (!win) return;
+      canvasCommand = {
+        mode: "add_root_markup",
+        jointType: "",
+        jointId: "",
+        shapeType: "",
+        cellPreset: "",
+        cellOpening: "",
+        cellPanels: "",
+        cellTracks: "",
+        panelMode: "",
+        markupType: "text"
+      };
+      selectedMemberId = "";
+      selectedJointId = "";
+      selectedMarkupId = "";
+      drawingMode = hasAssemblyScene() ? "assembly" : "window";
+      switchInspector("window");
+      render();
+      showToast("已选择文字标注，请在画布任意位置放置，右键退出。");
+    }
+
     function beginMarkupDrag(group, event) {
       if (event.button !== 0 || canvasCommand.mode) return null;
       event.preventDefault();
@@ -4825,17 +6038,26 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       group.removeAttribute("transform");
       const moved = drag.moved || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
       if (!moved) return false;
-      const found = findCellMarkup(group.dataset.markupId);
+      const found = findMarkupObject(group.dataset.markupId);
       if (!found) return false;
       selectedWindowId = found.win.windowId;
       const assembly = currentProjectAssembly();
       selectedPlacementId = assembly?.placements?.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
-      selectedCell = { row: found.row, col: found.col };
+      selectedCell = found.hostType === "window" ? { row: 0, col: 0 } : { row: found.row, col: found.col };
       selectedMarkupId = group.dataset.markupId || "";
-      const next = markupPositionFromEvent(group, event);
-      const margin = found.markup.kind === "text" ? 0 : 4;
-      found.markup.xPercent = Math.max(margin, Math.min(100 - margin, next.xPercent));
-      found.markup.yPercent = Math.max(margin, Math.min(100 - margin, next.yPercent));
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      const next = found.hostType === "window"
+        ? rootMarkupPositionFromEvent(group.dataset, event)
+        : markupPositionFromEvent(group, event);
+      const margin = found.hostType === "window" || found.markup.kind === "text" ? 0 : 4;
+      found.markup.xPercent = found.hostType === "window"
+        ? next.xPercent
+        : Math.max(margin, Math.min(100 - margin, next.xPercent));
+      found.markup.yPercent = found.hostType === "window"
+        ? next.yPercent
+        : Math.max(margin, Math.min(100 - margin, next.yPercent));
       found.markup.offsetXPercent = found.markup.xPercent - 50;
       found.markup.offsetYPercent = found.markup.yPercent - 50;
       markDirty();
@@ -4867,6 +6089,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         svg.removeEventListener("click", svg.__markupPlacementClickHandler, true);
       }
       svg.__markupPlacementMoveHandler = event => {
+        if (canvasCommand.mode === "add_root_markup" && canvasCommand.markupType === "text") {
+          showRootMarkupPlacementPreview(svg, event);
+          return;
+        }
         if (canvasCommand.mode !== "add_cell_markup" || !canvasCommand.markupType) {
           hideMarkupPlacementPreview();
           return;
@@ -4879,6 +6105,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         showMarkupPlacementPreview(group, event);
       };
       svg.__markupPlacementClickHandler = event => {
+        if (canvasCommand.mode === "add_root_markup" && canvasCommand.markupType === "text") {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          addRootTextMarkupFromEvent(svg, event);
+          return;
+        }
         if (canvasCommand.mode !== "add_cell_markup" || !canvasCommand.markupType) return;
         const group = findCellGroupFromEvent(svg, event);
         if (!group) return;
@@ -4891,6 +6124,34 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       svg.addEventListener("click", svg.__markupPlacementClickHandler, true);
     }
 
+    function addRootTextMarkupFromEvent(svg, event) {
+      const frame = findRootMarkupFrameFromEvent(svg, event);
+      const win = project.windows.find(item => item.windowId === frame?.windowId) || currentWindow();
+      if (!win || canvasCommand.mode !== "add_root_markup") return;
+      hideMarkupPlacementPreview();
+      const position = rootMarkupPositionFromEvent(frame, event);
+      win.markups = normalizeWindowMarkups(win.markups);
+      const markup = createWindowMarkup("text", {
+        ...position,
+        hostType: "window",
+        hostWindowId: win.windowId,
+        hostCellId: ""
+      });
+      win.markups.push(markup);
+      selectedWindowId = win.windowId;
+      selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === win.windowId)?.placementId || "";
+      selectedCell = { row: 0, col: 0 };
+      selectedMarkupId = markup.markupId;
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      switchInspector("window");
+      resetCanvasCommand();
+      markDirty();
+      openCanvasMarkupEditor(markup.markupId, event);
+      showToast("文字标注已挂到窗体根节点，请输入文字后回车保存。");
+    }
+
     function addCellMarkupFromEvent(cellGroup, event) {
       const win = project.windows.find(item => item.windowId === cellGroup.dataset.windowId) || currentWindow();
       const row = Number(cellGroup.dataset.row);
@@ -4899,6 +6160,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!cell || canvasCommand.mode !== "add_cell_markup") return;
       hideMarkupPlacementPreview();
       const markupType = canvasCommand.markupType || "text";
+      if (markupType === "text") {
+        canvasCommand.mode = "add_root_markup";
+        addRootTextMarkupFromEvent(document.getElementById("windowSvg"), event);
+        return;
+      }
       const position = markupPositionFromEvent(cellGroup, event);
       if (markupType !== "text") {
         position.xPercent = Math.max(4, Math.min(96, position.xPercent));
@@ -4951,12 +6217,25 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       previewLayer.append(preview);
     }
 
+    function showRootMarkupPlacementPreview(svg, event) {
+      if (canvasCommand.mode !== "add_root_markup" || canvasCommand.markupType !== "text") return;
+      const previewLayer = document.getElementById("markupPreviewLayer");
+      if (!previewLayer || !svg) return;
+      hideMarkupPlacementPreview();
+      const point = canvasPointFromMouse(svg, event);
+      const preview = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      preview.setAttribute("id", "markupPlacementPreview");
+      preview.setAttribute("class", "markup-placement-preview text root-markup-preview");
+      preview.innerHTML = `<rect x="${point.x - 38}" y="${point.y - 14}" width="76" height="28" rx="2" /><text x="${point.x}" y="${point.y + 4}">文字标注</text>`;
+      previewLayer.append(preview);
+    }
+
     function hideMarkupPlacementPreview() {
       document.getElementById("markupPlacementPreview")?.remove();
     }
 
     function openCanvasMarkupEditor(markupId, event) {
-      const found = findCellMarkup(markupId);
+      const found = findMarkupObject(markupId);
       const input = document.getElementById("canvasMarkupInput");
       const shell = document.querySelector(".canvas-shell");
       if (!found || !input || !shell) return;
@@ -4985,7 +6264,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function commitCanvasMarkupEditor() {
       const input = document.getElementById("canvasMarkupInput");
       if (!activeMarkupEditor || !input || input.classList.contains("hidden")) return;
-      const found = findCellMarkup(activeMarkupEditor.markupId);
+      const found = findMarkupObject(activeMarkupEditor.markupId);
       if (!found) {
         hideCanvasMarkupEditor();
         return;
@@ -5101,6 +6380,33 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!win) return null;
       if (target === "windowWidth") return { target, current: win.widthMm, min: 300, max: 30000, label: "外宽" };
       if (target === "windowHeight") return { target, current: win.heightMm, min: 300, max: 30000, label: "外高" };
+      if (target?.startsWith("throughDivider:")) {
+        const [, axis, rawIndex] = target.split(":");
+        const selected = currentThroughDivider();
+        const index = Number(rawIndex);
+        if (!selected || selected.axis !== axis || selected.index !== index) return null;
+        return {
+          target,
+          current: selected.positionPercent,
+          min: 1,
+          max: 99,
+          label: selected.label,
+          unit: "%"
+        };
+      }
+      if (target?.startsWith("localMemberPosition:")) {
+        const memberId = target.split(":")[1] || "";
+        const member = win.topology?.members?.find(item => item.memberId === memberId);
+        if (!member) return null;
+        return {
+          target,
+          current: Number(member.positionRatio || 0.5) * 100,
+          min: 8,
+          max: 92,
+          label: `${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}位置`,
+          unit: "%"
+        };
+      }
       return null;
     }
 
@@ -5134,6 +6440,22 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         win.heightMm = value;
         setValue("winHeight", value);
       }
+      if (target?.startsWith("throughDivider:")) {
+        const [, axis, rawIndex] = target.split(":");
+        applyThroughDividerPosition(win, axis, Number(rawIndex), value);
+      }
+      if (target?.startsWith("localMemberPosition:")) {
+        const memberId = target.split(":")[1] || "";
+        const member = win.topology?.members?.find(item => item.memberId === memberId);
+        const host = findMemberHost(win.layout, member);
+        if (member && host) {
+          member.positionRatio = Math.max(0.08, Math.min(0.92, value / 100));
+          selectedMemberId = member.memberId;
+          selectedCell = { row: host.row, col: host.col };
+          clearDividerSelection();
+          switchInspector("member");
+        }
+      }
       markDirty();
     }
 
@@ -5151,7 +6473,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       input.dataset.min = String(meta.min);
       input.dataset.max = String(meta.max);
       input.setAttribute("aria-label", meta.label);
-      if (label) label.textContent = `${meta.label} mm`;
+      if (label) label.textContent = `${meta.label} ${meta.unit || "mm"}`;
       input.min = String(meta.min);
       input.max = String(meta.max);
       input.step = "1";
@@ -5171,8 +6493,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       </defs>`;
     }
 
-    function renderProfileBevel(x, y, width, height, face) {
+    function renderShapedProfileBevel(win, x, y, width, height, face) {
+      const outer = windowOuterShapePoints(win, { x, y, w: width, h: height, face });
+      const inner = windowInnerShapePoints(win, { x, y, w: width, h: height, face });
+      if (outer.length < 3 || inner.length < 3) return "";
+      const miters = outer.map((point, index) => {
+        const innerPoint = inner[Math.min(index, inner.length - 1)];
+        return `M${point[0]} ${point[1]} L${innerPoint[0]} ${innerPoint[1]}`;
+      });
+      return `
+        <g class="profile-bevel-layer profile-shape-bevel">
+          <path class="profile-bevel-highlight" d="${polygonPath(outer)}" />
+          <path class="profile-bevel-shadow" d="${polygonPath(inner)}" />
+          <path class="profile-bevel-miter" d="${miters.join(" ")}" />
+        </g>`;
+    }
+
+    function renderProfileBevel(x, y, width, height, face, win = null) {
       if (width <= 0 || height <= 0 || face <= 0) return "";
+      if (win && normalizeWindowShape(win.shape).type !== "rectangular") {
+        return renderShapedProfileBevel(win, x, y, width, height, face);
+      }
       const inset = Math.max(3, Math.min(face * 0.24, 13));
       const innerX = x + face;
       const innerY = y + face;
@@ -5253,7 +6594,29 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }).join("");
     }
 
+    function renderAssemblyWindowInternalDimensions(win, topLeft, drawW, drawH, colEdges, rowEdges) {
+      if (!project.viewOptions?.showDimensions) return "";
+      const colTotal = sum(win.layout.columns);
+      const rowTotal = sum(win.layout.rows);
+      const parts = [`<g class="assembly-window-internal-dimensions" data-window-id="${escapeHtml(win.windowId)}">`];
+      const shape = normalizeWindowShape(win.shape);
+      const showOpenState = Boolean(project.viewOptions?.showOpenState);
+      const topY = topLeft.y - (showOpenState ? (shape.type === "arched" ? 108 : 92) : 30);
+      const rightX = topLeft.x + drawW + (showOpenState ? 38 : 30);
+      for (let col = 0; col < win.layout.columns.length; col += 1) {
+        const widthMm = Number(win.widthMm || 0) * Number(win.layout.columns[col] || 0) / Math.max(1, colTotal);
+        parts.push(dimensionLine(colEdges[col], topY, colEdges[col + 1], topY, sizeRatioLabel(widthMm, win.layout.columns[col], colTotal)));
+      }
+      for (let row = 0; row < win.layout.rows.length; row += 1) {
+        const heightMm = Number(win.heightMm || 0) * Number(win.layout.rows[row] || 0) / Math.max(1, rowTotal);
+        parts.push(dimensionLine(rightX, rowEdges[row], rightX, rowEdges[row + 1], sizeRatioLabel(heightMm, win.layout.rows[row], rowTotal), true));
+      }
+      parts.push(`</g>`);
+      return parts.join("");
+    }
+
     function renderAssemblySvg(svg) {
+      canvasRootMarkupFrames = [];
       const showPlanView = Boolean(project.viewOptions?.showPlanView);
       const view = { w: 900, h: showPlanView ? 800 : 700 };
       const elevationHeight = showPlanView ? 470 : view.h;
@@ -5276,7 +6639,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const maxX = Math.max(...elevationExtents.map(item => item.x2));
       const minY = Math.min(...elevationExtents.map(item => item.y1));
       const maxY = Math.max(...elevationExtents.map(item => item.y2));
-      const margin = 86;
+      const margin = project.viewOptions?.showOpenState ? 112 : 86;
       const scale = Math.min(
         (view.w - margin * 2) / Math.max(1, maxX - minX),
         (elevationHeight - margin * 2) / Math.max(1, maxY - minY)
@@ -5321,29 +6684,41 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const topLeft = mapElevation(item.x, item.y);
         const drawW = item.w * scale;
         const drawH = item.h * scale;
+        canvasRootMarkupFrames.push({ windowId: win.windowId, x: topLeft.x, y: topLeft.y, w: drawW, h: drawH });
         const selected = !selectedJointId && (item.placementId ? item.placementId === selectedPlacementId : !selectedPlacementId && win.windowId === selectedWindowId && activeInspectorTab !== "assembly");
         parts.push(`<g class="assembly-window ${selected ? "selected" : ""}" data-window-id="${escapeHtml(win.windowId)}" data-placement-id="${escapeHtml(item.placementId)}" tabindex="0">`);
         const frameColor = project.viewOptions?.showProfileColor ? profileColor(win.colorInside, series.material) : "#7e8792";
         const framePath = frameShapePath(win, topLeft.x, topLeft.y, drawW, drawH, face);
         parts.push(`<path class="assembly-window-frame" d="${framePath}" fill-rule="evenodd" style="fill:${frameColor}" />`);
-        parts.push(renderProfileBevel(topLeft.x, topLeft.y, drawW, drawH, face));
-        parts.push(`<rect class="assembly-window-inner" x="${topLeft.x + face}" y="${topLeft.y + face}" width="${Math.max(0, drawW - face * 2)}" height="${Math.max(0, drawH - face * 2)}" />`);
+        const frameInfo = { x: topLeft.x, y: topLeft.y, w: drawW, h: drawH, face };
+        const innerFillPath = windowInnerFillPath(win, frameInfo);
+        parts.push(renderProfileBevel(topLeft.x, topLeft.y, drawW, drawH, face, win));
+        parts.push(innerFillPath
+          ? `<path class="assembly-window-inner" d="${innerFillPath}" />`
+          : `<rect class="assembly-window-inner" x="${topLeft.x + face}" y="${topLeft.y + face}" width="${Math.max(0, drawW - face * 2)}" height="${Math.max(0, drawH - face * 2)}" />`);
         const innerWidth = Math.max(0, drawW - face * 2);
         const innerHeight = Math.max(0, drawH - face * 2);
         const assemblyInner = { x: topLeft.x + face, y: topLeft.y + face, w: innerWidth, h: innerHeight };
-        parts.push(renderAssemblyWindowCells(win, assemblyInner, scale, "#26393e"));
-        const colTotal = sum(win.layout.columns);
-        let colAt = topLeft.x + face;
-        for (let index = 0; index < win.layout.columns.length - 1; index += 1) {
-          colAt += innerWidth * win.layout.columns[index] / colTotal;
-          parts.push(`<line class="assembly-window-divider" x1="${colAt}" y1="${topLeft.y + face}" x2="${colAt}" y2="${topLeft.y + drawH - face}" />`);
+        const assemblyRects = computeCellRects(win, assemblyInner).map(rect => ({ ...rect, windowId: win.windowId }));
+        const assemblyColEdges = rectsToEdges(win.layout.columns, assemblyInner.x, assemblyInner.w);
+        const assemblyRowEdges = rectsToEdges(win.layout.rows, assemblyInner.y, assemblyInner.h);
+        const foregroundOpenCells = [];
+        const assemblyRenderRects = assemblyRects.map(rect => cellRenderItemWithShape(win, rect, frameInfo));
+        parts.push(renderAssemblyWindowCells(win, assemblyInner, scale, "#26393e", {
+          includeMarkups: false,
+          frameInfo,
+          foregroundOpenCells
+        }));
+        parts.push(renderThroughMullions(win, assemblyColEdges, assemblyRowEdges, face, frameColor, "#26393e"));
+        parts.push(renderTopologyMembers(win, assemblyRects, face, frameColor, "#26393e"));
+        if (project.viewOptions?.showOpenState) {
+          parts.push(renderWindowFrameOcclusion(win, topLeft.x, topLeft.y, drawW, drawH, face, frameColor, "#26393e", "assembly-window-frame-occlusion"));
+          if (foregroundOpenCells.length) {
+            parts.push(`<g class="open-sash-foreground-layer">${foregroundOpenCells.join("")}</g>`);
+          }
         }
-        const rowTotal = sum(win.layout.rows);
-        let rowAt = topLeft.y + face;
-        for (let index = 0; index < win.layout.rows.length - 1; index += 1) {
-          rowAt += innerHeight * win.layout.rows[index] / rowTotal;
-          parts.push(`<line class="assembly-window-divider" x1="${topLeft.x + face}" y1="${rowAt}" x2="${topLeft.x + drawW - face}" y2="${rowAt}" />`);
-        }
+        parts.push(`<g class="markup-layer assembly-markup-layer">${assemblyRenderRects.map(rect => renderCellMarkups(rect.cell, rect, scale)).join("")}</g>`);
+        parts.push(renderWindowRootMarkups(win, { x: topLeft.x, y: topLeft.y, w: drawW, h: drawH }, scale));
         parts.push(renderWindowGeometryHandles(
           win,
           topLeft.x,
@@ -5352,9 +6727,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           drawH,
           assemblyInner,
           scale,
-          rectsToEdges(win.layout.columns, assemblyInner.x, assemblyInner.w),
-          rectsToEdges(win.layout.rows, assemblyInner.y, assemblyInner.h)
+          assemblyColEdges,
+          assemblyRowEdges
         ));
+        parts.push(renderAssemblyWindowInternalDimensions(win, topLeft, drawW, drawH, assemblyColEdges, assemblyRowEdges));
+        if (project.viewOptions?.showDimensions) {
+          parts.push(renderCustomShapeAnnotations(win, topLeft.x, topLeft.y, drawW, drawH));
+        }
         parts.push(`<text class="assembly-window-label" x="${topLeft.x + drawW / 2}" y="${topLeft.y + drawH / 2}">${escapeHtml(win.mark)}</text>`);
         parts.push("</g>");
       });
@@ -5370,6 +6749,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       });
       parts.push(dimensionLine(elevationMin.x, elevationMax.y + 58, elevationMax.x, elevationMax.y + 58, `${Math.round(maxX - minX)} mm`));
       parts.push(dimensionLine(elevationMax.x + 44, elevationMin.y, elevationMax.x + 44, elevationMax.y, `${Math.round(maxY - minY)} mm`, true));
+      const sillHeights = [...new Set(elevationBoxes.map(item => Math.round(Number(item.window?.installation?.sillHeightMm || 0))))];
+      const sillHeightText = sillHeights.length <= 1 ? `台高 ${sillHeights[0] || 0} mm` : `台高 ${sillHeights.join(" / ")} mm`;
+      parts.push(`<text class="sill-height-label assembly-sill-height-label" x="${elevationMax.x + 10}" y="${elevationMax.y + 17}">${escapeHtml(sillHeightText)}</text>`);
       if (bounds.depthMm > 0.5) parts.push(`<text class="sill-height-label" x="${margin}" y="${elevationHeight - 18}">空间进深 ${Math.round(bounds.depthMm)} mm</text>`);
       parts.push(renderAssemblyCommandZones(elevationMin.x, elevationMin.y, elevationMax.x - elevationMin.x, elevationMax.y - elevationMin.y));
       parts.push(renderAssemblyInternalJointZones(assembly, elevationBoxes, mapElevation, scale));
@@ -5380,6 +6762,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       setCanvasSvgContent(svg, parts);
       bindCanvasMarkupPlacement(svg);
       bindCanvasGeometryDrag(svg);
+      bindCanvasMarkupContextMenus(svg);
+      bindAssemblyTopologyMembers(svg, assembly);
 
       const selectGroup = group => {
         selectedWindowId = group.dataset.windowId;
@@ -5453,19 +6837,14 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       svg.querySelectorAll(".cell-markup").forEach(group => {
         group.addEventListener("click", event => {
           event.stopPropagation();
-          const found = findCellMarkup(group.dataset.markupId);
-          if (!found) return;
-          selectedWindowId = found.win.windowId;
-          selectedPlacementId = assembly.placements.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
-          selectedMarkupId = group.dataset.markupId || "";
-          selectedCell = { row: found.row, col: found.col };
-          switchInspector("cell");
+          selectMarkupObject(group.dataset.markupId || "");
           render();
         });
+        group.addEventListener("contextmenu", event => openMarkupContextMenuFromGroup(group, event));
         group.addEventListener("dblclick", event => {
           event.preventDefault();
           event.stopPropagation();
-          const found = findCellMarkup(group.dataset.markupId);
+          const found = findMarkupObject(group.dataset.markupId);
           if (found) selectedWindowId = found.win.windowId;
           openCanvasMarkupEditor(group.dataset.markupId, event);
         });
@@ -5801,12 +7180,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         w: Math.max(1, win.widthMm - face * 2) * unit,
         h: Math.max(1, win.heightMm - face * 2) * unit
       });
-      const ratio = project.viewOptions?.showOpenState ? 1 : 0;
       const points = [];
       const parts = [];
       rects.forEach(rect => {
         parts.push(renderPlanCellTracks(rect, 0, "#26393e", "#dce5e8", null));
         buildPlanOpeningParts(rect.cell, rect, 0, 7, null).forEach(entry => {
+          const ratio = project.viewOptions?.showOpenState ? cellOpeningRatio(entry.part.cell) : 0;
           const projections = entry.kind === "folding"
             ? foldingPlanProjections(entry.part, ratio).panels
             : [openingPlanProjection(entry.part, ratio)];
@@ -5845,14 +7224,98 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         }
         const labelX = x + width / 2;
         const labelY = y + Math.min(height / 2, 14);
+        const dotY = member.orientation === "horizontal" ? y + height / 2 : host.y + host.h * 0.5;
+        const dotX = member.orientation === "horizontal" ? host.x + host.w * 0.5 : x + width / 2;
         return `
-          <g class="topology-member ${selected ? "selected" : ""}" data-member-id="${escapeHtml(member.memberId)}" tabindex="0" role="button" aria-label="${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}">
+          <g class="topology-member ${selected ? "selected" : ""}" data-member-window="${escapeHtml(win.windowId)}" data-member-id="${escapeHtml(member.memberId)}" data-member-orientation="${escapeHtml(member.orientation)}" data-member-host-x="${host.x}" data-member-host-y="${host.y}" data-member-host-w="${host.w}" data-member-host-h="${host.h}" tabindex="0" role="button" aria-label="${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}">
             <rect class="topology-member-hit" x="${x - 4}" y="${y - 4}" width="${Math.max(8, width + 8)}" height="${Math.max(8, height + 8)}" />
             <rect class="topology-member-profile" x="${x}" y="${y}" width="${Math.max(1, width)}" height="${Math.max(1, height)}" fill="${fillColor}" stroke="${outlineColor}" />
             ${renderProfileDividerBevel(x, y, Math.max(1, width), Math.max(1, height))}
+            <circle class="topology-member-drag-dot" cx="${dotX}" cy="${dotY}" r="5" />
             <text class="topology-member-label" x="${labelX}" y="${labelY}">${memberLabel(member, index)}</text>
           </g>`;
       }).join("");
+    }
+
+    function bindAssemblyTopologyMembers(svg, assembly) {
+      svg.querySelectorAll(".topology-member").forEach(group => {
+        const select = () => {
+          const win = project.windows.find(item => item.windowId === group.dataset.memberWindow);
+          const member = win?.topology?.members?.find(item => item.memberId === group.dataset.memberId);
+          const host = findMemberHost(win?.layout, member);
+          if (!win || !member || !host) return;
+          selectedWindowId = win.windowId;
+          selectedPlacementId = assembly?.placements?.find(placement => placement.windowId === win.windowId)?.placementId || "";
+          selectedJointId = "";
+          selectedMemberId = member.memberId;
+          selectedMarkupId = "";
+          clearDividerSelection();
+          selectedCell = { row: host.row, col: host.col };
+          switchInspector("member");
+          render();
+        };
+        group.addEventListener("click", event => {
+          event.stopPropagation();
+          select();
+        });
+        group.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          select();
+          showMemberContextMenu(event, group.dataset.memberId);
+        });
+        group.addEventListener("dblclick", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const win = project.windows.find(item => item.windowId === group.dataset.memberWindow);
+          const member = win?.topology?.members?.find(item => item.memberId === group.dataset.memberId);
+          if (!member) return;
+          select();
+          openCanvasDimensionEditor(localMemberPositionTarget(member.memberId), event);
+        });
+        group.addEventListener("pointerdown", event => {
+          if (event.button !== 0 || canvasCommand.mode) return;
+          const win = project.windows.find(item => item.windowId === group.dataset.memberWindow);
+          const member = win?.topology?.members?.find(item => item.memberId === group.dataset.memberId);
+          const host = findMemberHost(win?.layout, member);
+          if (!win || !member || !host) return;
+          event.preventDefault();
+          event.stopPropagation();
+          select();
+          const point = canvasPointFromMouse(svg, event);
+          geometryDrag = {
+            pointerId: event.pointerId,
+            windowId: win.windowId,
+            kind: "localMember",
+            memberId: member.memberId,
+            axis: member.orientation === "horizontal" ? "row" : "column",
+            startPoint: point,
+            startPositionRatio: member.positionRatio,
+            hostWidth: Math.max(1, Number(group.dataset.memberHostW || 1)),
+            hostHeight: Math.max(1, Number(group.dataset.memberHostH || 1)),
+            changed: false,
+            moved: false
+          };
+          const move = moveEvent => updateGeometryDrag(svg, moveEvent);
+          const up = upEvent => {
+            finishGeometryDrag(svg, upEvent);
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          geometryDrag.cleanup = () => {
+            document.removeEventListener("pointermove", move, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+          };
+          document.addEventListener("pointermove", move, true);
+          document.addEventListener("pointerup", up, true);
+          document.addEventListener("pointercancel", up, true);
+        });
+        group.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") select();
+        });
+      });
     }
 
     function renderEngineeringJoints(win, x, y, width, height) {
@@ -6052,6 +7515,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return item.y + item.h - handleHeightMm * scale;
     }
 
+    function cellOpeningRatio(cell) {
+      const assembly = normalizeOpeningAssembly(cell?.type, cell?.opening, cell?.openingAssembly);
+      return Math.max(0, Math.min(1, Number(assembly.openPercent ?? 80) / 100));
+    }
+
     function openingDirectionText(cell) {
       if (!cell || !isOperableType(cell.type)) return "";
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
@@ -6068,32 +7536,356 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return `<text class="opening-direction-label" x="${x}" y="${y}" text-anchor="${anchor}">${escapeHtml(label)}</text>`;
     }
 
-    function openSashElevation(cell, item, outlineColor, frameColor, scale) {
-      const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
+    function renderOpenCellAboveFrame(cell) {
+      if (!project.viewOptions?.showOpenState || !isOperableType(cell?.type) || cellOpeningRatio(cell) <= 0.001) return false;
+      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      return assembly.openPlane === "in";
+    }
+
+    function renderWindowFrameOcclusion(win, x, y, width, height, face, frameColor, outlineColor, className = "window-frame-occlusion") {
+      const framePath = frameShapePath(win, x, y, width, height, face);
+      return `<g class="${className}">
+        <path d="${framePath}" fill="${frameColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="2" />
+        ${renderProfileBevel(x, y, width, height, face, win)}
+      </g>`;
+    }
+
+    function pointToward(from, to, distance) {
+      const dx = from[0] - to[0];
+      const dy = from[1] - to[1];
+      const length = Math.hypot(dx, dy) || 1;
+      const move = Math.min(Math.max(0, distance), length * 0.45);
+      return [to[0] + dx / length * move, to[1] + dy / length * move];
+    }
+
+    function pointOnSegment(start, end, ratio) {
+      const t = Math.max(0, Math.min(1, Number(ratio) || 0));
+      return [
+        start[0] + (end[0] - start[0]) * t,
+        start[1] + (end[1] - start[1]) * t
+      ];
+    }
+
+    function offsetSegmentToward(start, end, toward, distance) {
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length = Math.hypot(dx, dy) || 1;
+      let nx = -dy / length;
+      let ny = dx / length;
+      const midX = (start[0] + end[0]) / 2;
+      const midY = (start[1] + end[1]) / 2;
+      if ((toward[0] - midX) * nx + (toward[1] - midY) * ny < 0) {
+        nx *= -1;
+        ny *= -1;
+      }
+      return [
+        [start[0] + nx * distance, start[1] + ny * distance],
+        [end[0] + nx * distance, end[1] + ny * distance]
+      ];
+    }
+
+    function lineIntersection(a1, a2, b1, b2) {
+      const x1 = a1[0];
+      const y1 = a1[1];
+      const x2 = a2[0];
+      const y2 = a2[1];
+      const x3 = b1[0];
+      const y3 = b1[1];
+      const x4 = b2[0];
+      const y4 = b2[1];
+      const denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+      if (Math.abs(denominator) < 0.0001) return null;
+      const px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denominator;
+      const py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denominator;
+      return [px, py];
+    }
+
+    function openSashInnerPolygon(outer, face) {
+      if (!Array.isArray(outer) || outer.length < 4) return [];
+      const center = outer.reduce((acc, point) => [acc[0] + point[0], acc[1] + point[1]], [0, 0]).map(value => value / outer.length);
+      const inset = Math.max(4, face * 0.82);
+      const [leftTop, rightTop, rightBottom, leftBottom] = outer;
+      const topLine = offsetSegmentToward(leftTop, rightTop, center, inset);
+      const rightLine = offsetSegmentToward(rightTop, rightBottom, center, inset);
+      const bottomLine = offsetSegmentToward(rightBottom, leftBottom, center, inset);
+      const leftLine = offsetSegmentToward(leftBottom, leftTop, center, inset);
+      const inner = [
+        lineIntersection(leftLine[0], leftLine[1], topLine[0], topLine[1]),
+        lineIntersection(topLine[0], topLine[1], rightLine[0], rightLine[1]),
+        lineIntersection(rightLine[0], rightLine[1], bottomLine[0], bottomLine[1]),
+        lineIntersection(bottomLine[0], bottomLine[1], leftLine[0], leftLine[1])
+      ];
+      return inner.every(Boolean) ? inner : insetPolygonTowardCentroid(outer, inset);
+    }
+
+    function renderOpenSashProfileBands(outer, face, fillColor, outlineColor, leftHinged) {
+      if (!Array.isArray(outer) || outer.length < 4) return "";
+      const center = outer.reduce((acc, point) => [acc[0] + point[0], acc[1] + point[1]], [0, 0]).map(value => value / outer.length);
+      const bandFace = Math.max(5, face * 0.82);
+      const [leftTop, rightTop, rightBottom, leftBottom] = outer;
+      const bands = [
+        ["top", leftTop, rightTop],
+        ["bottom", leftBottom, rightBottom],
+        ["free", leftHinged ? rightTop : leftTop, leftHinged ? rightBottom : leftBottom],
+        ["hinge", leftHinged ? leftBottom : rightBottom, leftHinged ? leftTop : rightTop]
+      ];
+      return bands.map(([name, start, end]) => {
+        const [innerStart, innerEnd] = offsetSegmentToward(start, end, center, bandFace);
+        const points = [start, end, innerEnd, innerStart].map(point => point.join(",")).join(" ");
+        return `<polygon class="open-sash-profile-band open-sash-profile-band-${name}" points="${points}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.35" />`;
+      }).join("");
+    }
+
+    function renderSashProfileRect(x, y, width, height, face, fillColor, outlineColor) {
+      if (width <= 0 || height <= 0) return "";
+      const safeFace = Math.max(4, Math.min(face, width / 2 - 1, height / 2 - 1));
+      if (safeFace <= 0 || width <= safeFace * 2 || height <= safeFace * 2) {
+        return `<rect class="sash-profile-body" x="${x}" y="${y}" width="${width}" height="${height}" fill="${fillColor}" stroke="${outlineColor}" stroke-width="1.5" />`;
+      }
+      const innerX = x + safeFace;
+      const innerY = y + safeFace;
+      const innerW = width - safeFace * 2;
+      const innerH = height - safeFace * 2;
+      const bodyPath = `M${x} ${y} H${x + width} V${y + height} H${x} Z M${innerX} ${innerY} H${innerX + innerW} V${innerY + innerH} H${innerX} Z`;
+      return `
+        <g class="sash-profile-frame">
+          <path class="sash-profile-body" d="${bodyPath}" fill="${fillColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="1.4" />
+          ${renderProfileBevel(x, y, width, height, safeFace)}
+        </g>`;
+    }
+
+    function renderSashProfilePolygon(outer, face, fillColor, outlineColor) {
+      if (!Array.isArray(outer) || outer.length < 3) return "";
+      const safeFace = Math.max(4, Math.min(face, ...outer.map((point, index) => {
+        const next = outer[(index + 1) % outer.length];
+        return Math.hypot(next[0] - point[0], next[1] - point[1]) * 0.28;
+      })));
+      const inner = insetPolygonTowardCentroid(outer, safeFace);
+      const bodyPath = polygonFramePath(outer, inner);
+      const last = outer.length - 1;
+      const innerLast = inner.length - 1;
+      const highlights = [
+        `M${outer[0][0]} ${outer[0][1]} L${outer[1][0]} ${outer[1][1]}`,
+        `M${outer[last][0]} ${outer[last][1]} L${outer[0][0]} ${outer[0][1]}`,
+        `M${inner[0][0]} ${inner[0][1]} L${inner[1][0]} ${inner[1][1]}`,
+        `M${inner[innerLast][0]} ${inner[innerLast][1]} L${inner[0][0]} ${inner[0][1]}`
+      ];
+      const shadows = [
+        `M${outer[1][0]} ${outer[1][1]} L${outer[2][0]} ${outer[2][1]}`,
+        `M${outer[2][0]} ${outer[2][1]} L${outer[3][0]} ${outer[3][1]}`,
+        `M${inner[1][0]} ${inner[1][1]} L${inner[2][0]} ${inner[2][1]}`,
+        `M${inner[2][0]} ${inner[2][1]} L${inner[3][0]} ${inner[3][1]}`
+      ];
+      const miters = outer.map((point, index) => `M${point[0]} ${point[1]} L${inner[index][0]} ${inner[index][1]}`);
+      return `
+        <g class="sash-profile-frame">
+          <path class="sash-profile-body" d="${bodyPath}" fill="${fillColor}" fill-rule="evenodd" stroke="${outlineColor}" stroke-width="1.4" />
+          <path class="profile-bevel-highlight" d="${highlights.join(" ")}" />
+          <path class="profile-bevel-shadow" d="${shadows.join(" ")}" />
+          <path class="profile-bevel-miter" d="${miters.join(" ")}" />
+        </g>`;
+    }
+
+    function boundsForPoints(points) {
+      const xs = points.map(point => point[0]);
+      const ys = points.map(point => point[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+
+    function sashRenderMetrics(item, scale) {
+      const safeScale = Math.max(0.08, Number(scale) || 0.2);
+      const reveal = Math.max(1.5, Math.min(5, 8 * safeScale, Math.min(item.w, item.h) * 0.015));
+      const shapedPoints = Array.isArray(item.shapePoints) && item.shapePoints.length >= 3
+        ? insetPolygonTowardCentroid(item.shapePoints, reveal)
+        : [];
+      const bounds = shapedPoints.length ? boundsForPoints(shapedPoints) : null;
+      const left = bounds ? bounds.x : item.x + reveal;
+      const top = bounds ? bounds.y : item.y + reveal;
+      const width = Math.max(16, bounds ? bounds.w : item.w - reveal * 2);
+      const height = Math.max(18, bounds ? bounds.h : item.h - reveal * 2);
+      const sashFace = Math.max(6, Math.min(20, 55 * safeScale, width * 0.16, height * 0.16));
+      return { left, top, width, height, sashFace, shapedPoints };
+    }
+
+    function sideHungSashGeometry(cell, item, scale) {
+      const metrics = sashRenderMetrics(item, scale);
+      const { left, top, width, height, sashFace } = metrics;
+      const assembly = normalizeOpeningAssembly(cell?.type, cell?.opening, cell?.openingAssembly);
+      const opening = String(cell?.opening || "");
+      const leftHinged = opening.startsWith("left");
+      const outward = assembly.openPlane === "out";
+      const openRatio = cellOpeningRatio(cell);
+      const openAngle = openRatio * 78 * Math.PI / 180;
+      const fixedHingeX = leftHinged ? left : left + width;
+      const hingeX = fixedHingeX;
+      const sideDirection = leftHinged ? -1 : 1;
+      const sideProjection = Math.min(width * 0.055, Math.max(7, sashFace * 0.85)) * Math.sin(openAngle);
+      const hingeReturnX = hingeX + sideDirection * sideProjection;
+      const openProjectedWidth = width * Math.max(0.38, Math.cos(openAngle));
+      const freeX = leftHinged ? hingeX + openProjectedWidth : hingeX - openProjectedWidth;
+      const projectionOffsetY = (outward ? -1 : 1) * Math.min(58, Math.max(0, height * 0.14 * Math.sin(openAngle)));
+      const topFreeY = top + projectionOffsetY;
+      const bottomFreeY = top + height + projectionOffsetY;
+      const leftTop = leftHinged ? [hingeX, top] : [freeX, topFreeY];
+      const rightTop = leftHinged ? [freeX, topFreeY] : [hingeX, top];
+      const leftBottom = leftHinged ? [hingeX, top + height] : [freeX, bottomFreeY];
+      const rightBottom = leftHinged ? [freeX, bottomFreeY] : [hingeX, top + height];
+      const projectClosedPoint = point => {
+        const u = Math.max(0, Math.min(1, (point[0] - left) / Math.max(1, width)));
+        const v = Math.max(0, Math.min(1, (point[1] - top) / Math.max(1, height)));
+        const topX = leftTop[0] + (rightTop[0] - leftTop[0]) * u;
+        const topY = leftTop[1] + (rightTop[1] - leftTop[1]) * u;
+        const bottomX = leftBottom[0] + (rightBottom[0] - leftBottom[0]) * u;
+        const bottomY = leftBottom[1] + (rightBottom[1] - leftBottom[1]) * u;
+        return [topX + (bottomX - topX) * v, topY + (bottomY - topY) * v];
+      };
+      const outer = metrics.shapedPoints?.length
+        ? metrics.shapedPoints.map(projectClosedPoint)
+        : [leftTop, rightTop, rightBottom, leftBottom];
+      const freeEdgeX = leftHinged ? rightTop[0] : leftTop[0];
+      const sideFace = [
+        [hingeReturnX, top + projectionOffsetY * 0.72],
+        [hingeX, top],
+        [hingeX, top + height],
+        [hingeReturnX, top + height + projectionOffsetY * 0.72]
+      ];
+      const hingeChannelW = Math.max(4, Math.min(10, sashFace * 0.46));
+      const hingeChannelX = hingeX - hingeChannelW / 2;
+      return {
+        ...metrics,
+        leftHinged,
+        outward,
+        openRatio,
+        openAngle,
+        fixedHingeX,
+        hingeX,
+        hingeReturnX,
+        hingeCenterY: top + height / 2,
+        freeX: freeEdgeX,
+        topFreeY,
+        bottomFreeY,
+        projectionOffsetY,
+        sideProjection,
+        sideFace,
+        hingeChannelX,
+        hingeChannelW,
+        leftTop,
+        rightTop,
+        leftBottom,
+        rightBottom,
+        outer
+      };
+    }
+
+    function closedSashElevation(cell, item, outlineColor, frameColor, scale) {
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const hasHostedLock = normalizeCellMarkups(cell.markups).some(markup => markup.kind === "lock");
       const leftHinged = cell.opening?.startsWith("left");
-      const outward = cell.opening?.endsWith("out");
-      const hingeX = leftHinged ? item.x + inset : item.x + item.w - inset;
-      const span = Math.max(12, item.w - inset * 2);
-      const freeX = hingeX + (leftHinged ? 1 : -1) * span * 0.52;
-      const top = item.y + inset;
-      const bottom = item.y + item.h - inset;
-      const perspective = (outward ? -1 : 1) * Math.min(8, item.h * 0.035);
+      const handleX = ["top_hung", "bottom_hung"].includes(cell.type)
+        ? left + width / 2
+        : (leftHinged ? left + width - sashFace * 0.62 : left + sashFace * 0.62);
       const handleY = handlePositionY(cell, item, scale);
-      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.32)" : "rgba(188,228,246,0.48)";
-      const labelX = (hingeX + freeX) / 2;
-      const labelY = Math.max(item.y + 14, top + 16);
+      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
+      const symbolItem = { x: left, y: top, w: width, h: height };
+      const symbolInset = Math.max(4, sashFace * 0.78);
+      return `
+        <g class="closed-sash-elevation">
+          <rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />
+          ${renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor)}
+          ${openingSymbol(cell, symbolItem, symbolInset)}
+          ${hasHostedLock ? "" : `<line class="sash-profile-handle" x1="${handleX}" y1="${handleY - 9}" x2="${handleX}" y2="${handleY + 9}" />`}
+        </g>
+      `;
+    }
+
+    function closedSymbolicElevation(cell, item, outlineColor, frameColor, scale) {
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.34)";
+      return `
+        <g class="closed-sash-elevation">
+          <rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />
+          ${renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor)}
+          ${openingSymbol(cell, { x: left, y: top, w: width, h: height }, Math.max(4, sashFace * 0.78))}
+        </g>`;
+    }
+
+    function openSashElevation(cell, item, outlineColor, frameColor, scale) {
+      const {
+        left,
+        top,
+        width,
+        height,
+        sashFace,
+        leftHinged,
+        fixedHingeX,
+        hingeX,
+        hingeReturnX,
+        hingeCenterY,
+        freeX,
+        topFreeY,
+        bottomFreeY,
+        projectionOffsetY,
+        sideFace,
+        hingeChannelX,
+        hingeChannelW,
+        leftTop,
+        rightTop,
+        leftBottom,
+        rightBottom,
+        outer
+      } = sideHungSashGeometry(cell, item, scale);
+      const shapedSash = Array.isArray(item.shapePoints) && item.shapePoints.length >= 3;
+      const inner = shapedSash
+        ? insetPolygonTowardCentroid(outer, Math.max(4, sashFace * 0.82))
+        : openSashInnerPolygon(outer, sashFace);
+      const symbolInset = Math.max(3, sashFace * 0.35);
+      const hingePoint = [hingeX, hingeCenterY];
+      const freeTopPoint = leftHinged ? rightTop : leftTop;
+      const freeBottomPoint = leftHinged ? rightBottom : leftBottom;
+      const symbolTopPoint = pointToward(hingePoint, freeTopPoint, symbolInset);
+      const symbolBottomPoint = pointToward(hingePoint, freeBottomPoint, symbolInset);
+      const handleRatio = Math.max(0.08, Math.min(0.92, (handlePositionY(cell, item, scale) - top) / Math.max(1, height)));
+      const handlePoint = pointOnSegment(freeTopPoint, freeBottomPoint, handleRatio);
+      const handleX = handlePoint[0] + (leftHinged ? -1 : 1) * sashFace * 0.36;
+      const handleY = handlePoint[1];
+      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.26)" : "rgba(188,228,246,0.30)";
+      const openLine = `M${hingeX} ${hingeCenterY} L${symbolTopPoint[0]} ${symbolTopPoint[1]} M${hingeX} ${hingeCenterY} L${symbolBottomPoint[0]} ${symbolBottomPoint[1]}`;
+      const directionX = (hingeX + freeTopPoint[0]) / 2;
+      const directionY = Math.max(Math.min(top, topFreeY) + 18, Math.min(top + height - 12, (top + topFreeY) / 2 + sashFace * 0.7));
+      const hasHostedLock = normalizeCellMarkups(cell.markups).some(markup => markup.kind === "lock");
+      const hingePlateX = hingeX - Math.max(1.5, sashFace * 0.16);
+      const hingePlateW = Math.max(3, sashFace * 0.32);
+      const hingePlateH = Math.max(10, Math.min(20, height * 0.12));
+      const hingePlateYs = [top + height * 0.22, top + height * 0.78];
+      const sideFacePoints = sideFace.map(point => point.join(",")).join(" ");
+      const strapX = hingeX + (leftHinged ? -1 : 1) * Math.max(4, Math.abs(hingeReturnX - hingeX) * 0.72);
+      const strapShiftY = projectionOffsetY * 0.28;
       return `
         <g class="open-sash-elevation">
-          <path d="M${hingeX} ${top} L${freeX} ${top + perspective} L${freeX} ${bottom - perspective} L${hingeX} ${bottom} Z"
-            fill="${glassFill}" stroke="${outlineColor}" stroke-width="${Math.max(4, Math.min(7, inset * 0.42))}" />
-          <line x1="${hingeX}" y1="${top}" x2="${hingeX}" y2="${bottom}" stroke="${frameColor}" stroke-width="3" />
-          <line x1="${freeX}" y1="${handleY - 9}" x2="${freeX}" y2="${handleY + 9}" stroke="#8a5a00" stroke-width="4" stroke-linecap="round" />
-          ${openingDirectionSvgLabel(cell, labelX, labelY)}
+          <polygon class="open-sash-side-face" points="${sideFacePoints}" fill="${frameColor}" stroke="${outlineColor}" stroke-width="1.25" />
+          <rect class="open-sash-hinge-channel" x="${hingeChannelX}" y="${top}" width="${hingeChannelW}" height="${height}" />
+          <polygon class="sash-profile-glass open-sash-glass" points="${inner.map(point => point.join(",")).join(" ")}" fill="${glassFill}" />
+          ${shapedSash
+            ? renderSashProfilePolygon(outer, sashFace, frameColor, outlineColor)
+            : renderOpenSashProfileBands(outer, sashFace, frameColor, outlineColor, leftHinged)}
+          <path class="sash-mechanism-link" d="M${fixedHingeX} ${top + height * 0.2} L${strapX} ${top + height * 0.2 + strapShiftY} M${fixedHingeX} ${top + height * 0.8} L${strapX} ${top + height * 0.8 + strapShiftY}" />
+          <line class="sash-hinge-axis" x1="${hingeX}" y1="${top}" x2="${hingeX}" y2="${top + height}" />
+          ${hingePlateYs.map(y => `<rect class="sash-hinge-plate" x="${hingePlateX}" y="${y - hingePlateH / 2}" width="${hingePlateW}" height="${hingePlateH}" rx="1" />`).join("")}
+          ${openingDirectionSvgLabel(cell, directionX, directionY)}
+          <path class="opening-symbol-line" d="${openLine}" />
+          ${hasHostedLock ? "" : `<line class="sash-profile-handle" x1="${handleX}" y1="${handleY - 9}" x2="${handleX}" y2="${handleY + 9}" />`}
         </g>
       `;
     }
 
     function openCellElevation(cell, item, outlineColor, frameColor, scale) {
+      if (cellOpeningRatio(cell) <= 0.001) {
+        return closedCellElevation(cell, item, outlineColor, frameColor, scale);
+      }
       if (["turn", "turn_tilt", "door"].includes(cell.type)) {
         if (cell.openingAssembly?.panelCount > 1) {
           return doubleSideHungElevation(cell, item, outlineColor, frameColor, scale);
@@ -6101,24 +7893,72 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         return openSashElevation(cell, item, outlineColor, frameColor, scale);
       }
       if (cell.type === "top_hung" || cell.type === "bottom_hung") {
-        return hungSashElevation(cell, item, outlineColor, frameColor);
+        return hungSashElevation(cell, item, outlineColor, frameColor, scale, true);
       }
       if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide"].includes(cell.type)) {
-        return slidingSashElevation(cell, item, outlineColor, frameColor);
+        return slidingSashElevation(cell, item, outlineColor, frameColor, scale, true);
       }
       if (cell.type === "parallel_project") {
-        return parallelProjectElevation(cell, item, outlineColor, frameColor);
+        return parallelProjectElevation(cell, item, outlineColor, frameColor, scale);
       }
       if (cell.type === "corner_slide") {
-        return cornerSlidingElevation(cell, item, outlineColor, frameColor);
+        return cornerSlidingElevation(cell, item, outlineColor, frameColor, scale);
       }
       if (cell.type === "vertical_slide") {
-        return verticalSashElevation(cell, item, outlineColor, frameColor);
+        return verticalSashElevation(cell, item, outlineColor, frameColor, scale);
       }
       if (cell.type === "folding") {
-        return foldingSashElevation(cell, item, outlineColor, frameColor);
+        return foldingSashElevation(cell, item, outlineColor, frameColor, scale);
       }
       return openingSymbol(cell, item, Math.min(item.w, item.h) * 0.12);
+    }
+
+    function closedCellElevation(cell, item, outlineColor, frameColor, scale) {
+      if (["turn", "turn_tilt", "door"].includes(cell.type) && cell.openingAssembly?.panelCount > 1) {
+        return closedDoubleSideHungElevation(cell, item, outlineColor, frameColor, scale);
+      }
+      if (["turn", "turn_tilt", "door", "top_hung", "bottom_hung"].includes(cell.type)) {
+        return closedSashElevation(cell, item, outlineColor, frameColor, scale);
+      }
+      if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide"].includes(cell.type)) {
+        return slidingSashElevation(cell, item, outlineColor, frameColor, scale, false);
+      }
+      if (["parallel_project", "corner_slide", "vertical_slide", "folding"].includes(cell.type)) {
+        return closedSymbolicElevation(cell, item, outlineColor, frameColor, scale);
+      }
+      return "";
+    }
+
+    function fixedPanelElevation(panelItem, frameColor, outlineColor, scale) {
+      const { left, top, width, height, sashFace } = sashRenderMetrics(panelItem, scale);
+      return `
+        <g class="closed-sash-elevation fixed-panel-elevation">
+          <rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="rgba(188,228,246,0.32)" />
+          ${renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor)}
+        </g>`;
+    }
+
+    function closedDoubleSideHungElevation(cell, item, outlineColor, frameColor, scale) {
+      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+      const gap = assembly.mullionMode === "flying_mullion" ? 1 : Math.max(4, item.w * 0.025);
+      const panelWidth = (item.w - gap) / 2;
+      return assembly.panels.slice(0, 2).map((panel, index) => {
+        const panelItem = {
+          ...item,
+          x: item.x + index * (panelWidth + gap),
+          w: panelWidth
+        };
+        const panelCell = {
+          ...cell,
+          opening: `${panel.hingeSide}_${assembly.openPlane}`,
+          openingAssembly: { ...assembly, panelCount: 1 }
+        };
+        const role = panel.role === "primary" ? "主" : (panel.role === "secondary" ? "从" : "固");
+        const elevation = panel.movable
+          ? closedSashElevation(panelCell, panelItem, outlineColor, frameColor, scale)
+          : fixedPanelElevation(panelItem, frameColor, outlineColor, scale);
+        return `${elevation}<text class="assembly-role" x="${panelItem.x + panelItem.w / 2}" y="${panelItem.y + 22}">${role}</text>`;
+      }).join("");
     }
 
     function doubleSideHungElevation(cell, item, outlineColor, frameColor, scale) {
@@ -6139,7 +7979,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const role = panel.role === "primary" ? "主" : (panel.role === "secondary" ? "从" : "固");
         const elevation = panel.movable
           ? openSashElevation(panelCell, panelItem, outlineColor, frameColor, scale)
-          : `<rect x="${panelItem.x + 7}" y="${panelItem.y + 7}" width="${Math.max(4, panelItem.w - 14)}" height="${Math.max(4, panelItem.h - 14)}" fill="rgba(188,228,246,0.30)" stroke="${frameColor}" stroke-width="4" />`;
+          : fixedPanelElevation(panelItem, frameColor, outlineColor, scale);
         return `${elevation}<text class="assembly-role" x="${panelItem.x + panelItem.w / 2}" y="${panelItem.y + 22}">${role}</text>`;
       }).join("");
     }
@@ -6168,135 +8008,162 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return lines.join("");
     }
 
-    function hungSashElevation(cell, item, outlineColor, frameColor) {
-      const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
+    function hungSashElevation(cell, item, outlineColor, frameColor, scale, opened = true) {
+      if (!opened) return closedSashElevation(cell, item, outlineColor, frameColor, scale);
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const openRatio = cellOpeningRatio(cell);
       const topHinged = cell.type === "top_hung";
-      const hingeY = topHinged ? item.y + inset : item.y + item.h - inset;
-      const freeY = hingeY + (topHinged ? 1 : -1) * Math.max(14, (item.h - inset * 2) * 0.58);
-      const left = item.x + inset;
-      const right = item.x + item.w - inset;
-      const taper = Math.min((right - left) * 0.12, 12);
+      const hingeY = topHinged ? top : top + height;
+      const freeY = topHinged ? top + height * (1 - 0.44 * openRatio) : top + height * 0.44 * openRatio;
+      const taper = Math.min(width * 0.1, 12);
+      const outer = topHinged
+        ? [[left, hingeY], [left + width, hingeY], [left + width - taper, freeY], [left + taper, freeY]]
+        : [[left + taper, freeY], [left + width - taper, freeY], [left + width, hingeY], [left, hingeY]];
+      const inner = insetPolygonTowardCentroid(outer, sashFace);
+      const handleY = topHinged ? freeY - sashFace * 0.48 : freeY + sashFace * 0.48;
+      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
       return `
         <g class="open-sash-elevation">
-          <path d="M${left} ${hingeY} L${right} ${hingeY} L${right - taper} ${freeY} L${left + taper} ${freeY} Z"
-            fill="rgba(188,228,246,0.48)" stroke="${outlineColor}" stroke-width="5" />
-          <line x1="${left}" y1="${hingeY}" x2="${right}" y2="${hingeY}" stroke="${frameColor}" stroke-width="3" />
-          <line x1="${item.x + item.w / 2 - 10}" y1="${freeY}" x2="${item.x + item.w / 2 + 10}" y2="${freeY}" stroke="#8a5a00" stroke-width="4" stroke-linecap="round" />
+          <rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />
+          <polygon class="sash-profile-glass" points="${inner.map(point => point.join(",")).join(" ")}" fill="${glassFill}" />
+          ${renderSashProfilePolygon(outer, sashFace, frameColor, outlineColor)}
+          ${openingDirectionSvgLabel(cell, left + width / 2, topHinged ? top + 16 : top + height - 8)}
+          <path class="opening-symbol-line" d="M${left} ${hingeY} L${left + width / 2} ${freeY} M${left + width} ${hingeY} L${left + width / 2} ${freeY}" />
+          <line class="sash-profile-handle" x1="${left + width / 2 - 10}" y1="${handleY}" x2="${left + width / 2 + 10}" y2="${handleY}" />
         </g>
       `;
     }
 
-    function slidingSashElevation(cell, item, outlineColor, frameColor) {
+    function slidingSashElevation(cell, item, outlineColor, frameColor, scale, opened = true) {
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
-      const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
-      const sashW = Math.max(12, (item.w - inset * 2) / assembly.panelCount * 1.06);
-      const sashH = Math.max(18, item.h - inset * 2);
-      const lift = cell.type === "lift_slide" ? -Math.min(8, item.h * 0.05) : 0;
-      const parallelOffset = ["psk", "parallel_slide"].includes(cell.type) ? Math.min(7, item.h * 0.04) : 0;
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const panelCount = Math.max(1, assembly.panelCount);
+      const openRatio = opened ? cellOpeningRatio(cell) : 0;
+      const panelW = Math.max(12, width / panelCount);
+      const sashW = Math.max(10, panelW + Math.min(sashFace * 0.7, panelW * 0.08));
+      const sashH = height;
+      const lift = opened && cell.type === "lift_slide" ? -Math.min(8, item.h * 0.05) * openRatio : 0;
+      const parallelOffset = opened && ["psk", "parallel_slide"].includes(cell.type) ? Math.min(10, item.h * 0.05) * openRatio : 0;
       const arrowY = item.y + item.h / 2;
       const rightward = assembly.stackSide === "right";
       const arrowStart = rightward ? item.x + item.w * 0.38 : item.x + item.w * 0.62;
       const arrowEnd = rightward ? item.x + item.w * 0.72 : item.x + item.w * 0.28;
       const panels = assembly.panels.map((panel, index) => {
-        const x = item.x + inset + index * (item.w - inset * 2) / assembly.panelCount;
+        const baseX = left + index * panelW;
+        const direction = assembly.stackSide === "both"
+          ? (index < panelCount / 2 ? -1 : 1)
+          : (rightward ? 1 : -1);
+        const slideShift = opened && panel.movable ? direction * Math.min(panelW * 0.55, width * 0.24) * openRatio : 0;
         const activeClass = panel.movable ? " active-panel" : "";
-        const panelY = item.y + inset + (panel.movable ? lift : 0);
+        const panelY = top + (panel.movable ? lift : 0);
         const offset = panel.movable ? parallelOffset : 0;
-        return `${offset ? `<line x1="${x}" y1="${panelY}" x2="${x + offset}" y2="${panelY - offset}" stroke="#788b94" stroke-width="1.5" />` : ""}<rect class="${activeClass}" x="${x + offset}" y="${panelY - offset}" width="${sashW}" height="${sashH}" fill="rgba(188,228,246,${panel.movable ? 0.52 : 0.3})" stroke="${panel.movable ? outlineColor : frameColor}" stroke-width="${panel.movable ? 4 : 3}" />`;
+        const x = baseX + slideShift + offset;
+        const y = panelY - offset;
+        const link = (opened && panel.movable && (Math.abs(slideShift) > 0.5 || offset))
+          ? `<line class="sash-mechanism-link" x1="${baseX + panelW / 2}" y1="${top + height / 2}" x2="${x + sashW / 2}" y2="${y + sashH / 2}" />`
+          : "";
+        return `${link}<g class="${activeClass}">${renderSashProfileRect(x, y, sashW, sashH, sashFace, frameColor, panel.movable ? outlineColor : "#5a747b")}</g>`;
       }).join("");
       const pocketSides = assembly.stackSide === "both" ? ["left", "right"] : [assembly.stackSide];
       const pocket = cell.type === "pocket_slide"
-        ? pocketSides.map(side => `<rect x="${side === "right" ? item.x + item.w * 0.72 : item.x}" y="${item.y}" width="${item.w * 0.28}" height="${item.h}" fill="rgba(126,135,146,0.18)" stroke="#7e8792" stroke-width="2" stroke-dasharray="6 4" />`).join("")
+        ? pocketSides.map(side => `<rect class="open-sash-pocket-guide" x="${side === "right" ? item.x + item.w * 0.72 : item.x}" y="${item.y}" width="${item.w * 0.28}" height="${item.h}" />`).join("")
         : "";
       const tiltMark = cell.type === "psk"
-        ? `<path d="M${item.x + inset} ${item.y + item.h - inset} L${item.x + item.w / 2} ${item.y + inset} L${item.x + item.w - inset} ${item.y + item.h - inset}" fill="none" stroke="#20383e" stroke-width="1.5" stroke-dasharray="6 4" />`
+        ? `<path class="opening-symbol-line" d="M${left} ${top + height} L${left + width / 2} ${top} L${left + width} ${top + height}" stroke-dasharray="6 4" />`
         : "";
       const slideArrow = assembly.stackSide === "both"
-        ? `<path d="M${item.x + item.w / 2 - 6} ${arrowY} H${item.x + inset + 14} m10 -8 l-10 8 10 8 M${item.x + item.w / 2 + 6} ${arrowY} H${item.x + item.w - inset - 14} m-10 -8 l10 8 -10 8" fill="none" stroke="${outlineColor}" stroke-width="2" />`
+        ? `<path d="M${item.x + item.w / 2 - 6} ${arrowY} H${left + 14} m10 -8 l-10 8 10 8 M${item.x + item.w / 2 + 6} ${arrowY} H${left + width - 14} m-10 -8 l10 8 -10 8" fill="none" stroke="${outlineColor}" stroke-width="2" />`
         : `<path d="M${arrowStart} ${arrowY}${cell.type === "lift_slide" ? `v-10` : ""} L${arrowEnd} ${arrowY - (cell.type === "lift_slide" ? 10 : 0)} m${rightward ? -10 : 10} -8 l${rightward ? 10 : -10} 8 ${rightward ? -10 : 10} 8" fill="none" stroke="${outlineColor}" stroke-width="2" />`;
       return `
         <g class="open-sash-elevation">
+          ${opened ? `<rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />` : ""}
           ${pocket}
           ${panels}
           ${tiltMark}
-          ${slideArrow}
+          ${opened ? slideArrow : openingSymbol(cell, { x: left, y: top, w: width, h: height }, Math.max(4, sashFace * 0.78))}
         </g>
       `;
     }
 
-    function parallelProjectElevation(cell, item, outlineColor, frameColor) {
-      const inset = Math.max(8, Math.min(item.w, item.h) * 0.1);
-      const offset = Math.min(12, Math.max(6, inset * 0.55));
-      const x = item.x + inset;
-      const y = item.y + inset;
-      const width = item.w - inset * 2;
-      const height = item.h - inset * 2;
+    function parallelProjectElevation(cell, item, outlineColor, frameColor, scale) {
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const openRatio = cellOpeningRatio(cell);
+      const offset = Math.min(14, Math.max(7, sashFace * 0.9)) * openRatio;
       return `
         <g class="open-sash-elevation">
-          <rect x="${x}" y="${y}" width="${width}" height="${height}" fill="rgba(188,228,246,0.22)" stroke="${frameColor}" stroke-width="3" />
-          <rect x="${x + offset}" y="${y - offset}" width="${width}" height="${height}" fill="rgba(188,228,246,0.5)" stroke="${outlineColor}" stroke-width="5" />
-          <path d="M${x} ${y} L${x + offset} ${y - offset} M${x + width} ${y} L${x + width + offset} ${y - offset} M${x} ${y + height} L${x + offset} ${y + height - offset} M${x + width} ${y + height} L${x + width + offset} ${y + height - offset}" stroke="#7b8e96" stroke-width="2" />
+          <rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />
+          ${renderSashProfileRect(left + offset, top - offset, width, height, sashFace, frameColor, outlineColor)}
+          <path class="sash-mechanism-link" d="M${left} ${top} L${left + offset} ${top - offset} M${left + width} ${top} L${left + width + offset} ${top - offset} M${left} ${top + height} L${left + offset} ${top + height - offset} M${left + width} ${top + height} L${left + width + offset} ${top + height - offset}" />
+          ${openingSymbol(cell, { x: left + offset, y: top - offset, w: width, h: height }, Math.max(4, sashFace * 0.78))}
         </g>
       `;
     }
 
-    function cornerSlidingElevation(cell, item, outlineColor, frameColor) {
+    function cornerSlidingElevation(cell, item, outlineColor, frameColor, scale) {
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
-      const inset = Math.max(8, Math.min(item.w, item.h) * 0.1);
-      const centerX = item.x + item.w / 2;
-      const top = item.y + inset;
-      const bottom = item.y + item.h - inset;
-      const gap = assembly.cornerPostMode === "postless" ? 2 : Math.max(6, item.w * 0.025);
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const openRatio = cellOpeningRatio(cell);
+      const centerX = left + width / 2;
+      const bottom = top + height;
+      const gap = assembly.cornerPostMode === "postless" ? 2 : Math.max(6, width * 0.025);
       const arrows = assembly.stackSide === "left"
-        ? `M${centerX} ${item.y + item.h / 2} H${item.x + inset + 14} m10 -8 l-10 8 10 8`
+        ? `M${centerX} ${item.y + item.h / 2} H${left + 14} m10 -8 l-10 8 10 8`
         : (assembly.stackSide === "right"
-          ? `M${centerX} ${item.y + item.h / 2} H${item.x + item.w - inset - 14} m-10 -8 l10 8 -10 8`
-          : `M${centerX - 6} ${item.y + item.h / 2} H${item.x + inset + 14} m10 -8 l-10 8 10 8 M${centerX + 6} ${item.y + item.h / 2} H${item.x + item.w - inset - 14} m-10 -8 l10 8 -10 8`);
+          ? `M${centerX} ${item.y + item.h / 2} H${left + width - 14} m-10 -8 l10 8 -10 8`
+          : `M${centerX - 6} ${item.y + item.h / 2} H${left + 14} m10 -8 l-10 8 10 8 M${centerX + 6} ${item.y + item.h / 2} H${left + width - 14} m-10 -8 l10 8 -10 8`);
+      const leftPanelW = Math.max(4, centerX - gap / 2 - left);
+      const rightPanelX = centerX + gap / 2;
+      const rightPanelW = Math.max(4, left + width - rightPanelX);
       return `
         <g class="open-sash-elevation">
-          <rect x="${item.x + inset}" y="${top}" width="${Math.max(4, centerX - gap / 2 - item.x - inset)}" height="${bottom - top}" fill="rgba(188,228,246,0.46)" stroke="${outlineColor}" stroke-width="4" />
-          <rect x="${centerX + gap / 2}" y="${top}" width="${Math.max(4, item.x + item.w - inset - centerX - gap / 2)}" height="${bottom - top}" fill="rgba(188,228,246,0.46)" stroke="${outlineColor}" stroke-width="4" />
+          <rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />
+          ${renderSashProfileRect(left - (assembly.stackSide !== "right" ? leftPanelW * 0.18 * openRatio : 0), top, leftPanelW, bottom - top, sashFace, frameColor, outlineColor)}
+          ${renderSashProfileRect(rightPanelX + (assembly.stackSide !== "left" ? rightPanelW * 0.18 * openRatio : 0), top, rightPanelW, bottom - top, sashFace, frameColor, outlineColor)}
           ${assembly.cornerPostMode === "post" ? `<rect x="${centerX - gap / 2}" y="${top}" width="${gap}" height="${bottom - top}" fill="${frameColor}" />` : ""}
           <path d="${arrows}" fill="none" stroke="${outlineColor}" stroke-width="2" />
         </g>
       `;
     }
 
-    function verticalSashElevation(cell, item, outlineColor, frameColor) {
+    function verticalSashElevation(cell, item, outlineColor, frameColor, scale) {
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
-      const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
-      const sashW = item.w - inset * 2;
-      const sashH = Math.max(18, (item.h - inset * 2) * 0.56);
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const openRatio = cellOpeningRatio(cell);
+      const sashW = width;
+      const sashH = Math.max(18, height * 0.56);
       const upward = assembly.stackSide !== "bottom";
-      const movingY = upward ? item.y + item.h - inset - sashH : item.y + inset;
-      const staticY = upward ? item.y + inset : item.y + item.h - inset - sashH;
+      const movingY = upward ? top + (height - sashH) * (1 - openRatio) : top + (height - sashH) * openRatio;
+      const staticY = upward ? top : top + height - sashH;
       const centerX = item.x + item.w / 2;
       const arrowStart = upward ? item.y + item.h * 0.68 : item.y + item.h * 0.32;
       const arrowEnd = upward ? item.y + item.h * 0.34 : item.y + item.h * 0.66;
       return `
         <g class="open-sash-elevation">
-          <rect x="${item.x + inset}" y="${staticY}" width="${sashW}" height="${sashH}" fill="rgba(188,228,246,${assembly.activePanelCount > 1 ? 0.48 : 0.3})" stroke="${assembly.activePanelCount > 1 ? outlineColor : frameColor}" stroke-width="4" />
-          <rect x="${item.x + inset}" y="${movingY}" width="${sashW}" height="${sashH}" fill="rgba(188,228,246,0.52)" stroke="${outlineColor}" stroke-width="5" />
+          <rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />
+          ${renderSashProfileRect(left, staticY, sashW, sashH, sashFace, frameColor, assembly.activePanelCount > 1 ? outlineColor : "#5a747b")}
+          ${renderSashProfileRect(left, movingY, sashW, sashH, sashFace, frameColor, outlineColor)}
           <path d="M${centerX} ${arrowStart} V${arrowEnd} m-8 ${upward ? 10 : -10} l8 ${upward ? -10 : 10} 8 ${upward ? 10 : -10}" fill="none" stroke="${outlineColor}" stroke-width="2" />
         </g>
       `;
     }
 
-    function foldingSashElevation(cell, item, outlineColor, frameColor) {
+    function foldingSashElevation(cell, item, outlineColor, frameColor, scale) {
       const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
-      const inset = Math.max(7, Math.min(item.w, item.h) * 0.1);
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const openRatio = cellOpeningRatio(cell);
       const leftward = assembly.stackSide !== "right";
-      const panelW = Math.max(6, (item.w - inset * 2) / assembly.panelCount);
+      const panelW = Math.max(6, width / assembly.panelCount);
       const points = [];
       for (let index = 0; index <= assembly.panelCount; index += 1) {
         const logical = leftward ? index : assembly.panelCount - index;
-        const x = item.x + inset + logical * panelW;
-        const y = item.y + item.h / 2 + (index % 2 === 0 ? -10 : 10);
+        const x = left + logical * panelW;
+        const y = item.y + item.h / 2 + (index % 2 === 0 ? -10 : 10) * openRatio;
         points.push(`${x},${y}`);
       }
       return `
         <g class="open-sash-elevation">
-          <rect x="${item.x + inset}" y="${item.y + inset}" width="${item.w - inset * 2}" height="${item.h - inset * 2}" fill="rgba(188,228,246,0.32)" stroke="${frameColor}" stroke-width="3" />
+          <rect class="open-sash-closed-footprint" x="${left}" y="${top}" width="${width}" height="${height}" />
+          ${renderSashProfileRect(left, top, width, height, sashFace, frameColor, "#5a747b")}
           <polyline points="${points.join(" ")}" fill="none" stroke="${outlineColor}" stroke-width="6" stroke-linejoin="round" />
           <path d="M${leftward ? item.x + item.w * 0.62 : item.x + item.w * 0.38} ${item.y + item.h * 0.72} H${leftward ? item.x + item.w * 0.26 : item.x + item.w * 0.74}" fill="none" stroke="${outlineColor}" stroke-width="2" />
         </g>
@@ -6325,10 +8192,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         parts.push(renderPlanCellTracks(item, planY, outlineColor, frameColor, cornerMount));
         const projections = buildPlanOpeningParts(item.cell, item, planY, section.wallThicknessPx, cornerMount);
         projections.forEach(entry => {
+          const ratio = options.showOpenState ? cellOpeningRatio(entry.part.cell) : 0;
           if (entry.kind === "folding") {
-            parts.push(renderPlanFoldingProjection(entry.part, options.showOpenState ? 1 : 0, planY));
+            parts.push(renderPlanFoldingProjection(entry.part, ratio, planY));
           } else {
-            parts.push(renderPlanPanelProjection(entry.part, options.showOpenState ? 1 : 0, planY, entry.overhead));
+            parts.push(renderPlanPanelProjection(entry.part, ratio, planY, entry.overhead));
           }
         });
       }
@@ -6432,9 +8300,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       let inside = Math.max(-section.wallInsidePx, -section.frameInsidePx);
       rects.forEach(item => {
         buildPlanOpeningParts(item.cell, item, 0, wallThicknessPx, cornerMount).forEach(entry => {
+          const ratio = cellOpeningRatio(entry.part.cell);
           const sets = entry.kind === "folding"
-            ? [foldingPlanProjections(entry.part, 0).panels, foldingPlanProjections(entry.part, 1).panels]
-            : [[openingPlanProjection(entry.part, 0)], [openingPlanProjection(entry.part, 1)]];
+            ? [foldingPlanProjections(entry.part, 0).panels, foldingPlanProjections(entry.part, ratio).panels]
+            : [[openingPlanProjection(entry.part, 0)], [openingPlanProjection(entry.part, ratio)]];
           sets.flat().forEach(projection => {
             projection.corners.forEach(point => {
               outside = Math.max(outside, point.z);
@@ -6878,9 +8747,34 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!menu || !member) return;
       selectedJointId = "";
       selectedMemberId = member.memberId;
+      clearDividerSelection();
       const index = win.topology.members.findIndex(item => item.memberId === member.memberId);
       const title = document.getElementById("memberMenuTitle");
       if (title) title.textContent = `${memberLabel(member, index)} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`;
+      const edit = document.getElementById("btnMemberMenuEdit");
+      const remove = document.getElementById("btnMemberMenuDelete");
+      if (edit) edit.textContent = "编辑局部梃";
+      if (remove) remove.textContent = "删除局部梃";
+      menu.classList.remove("hidden");
+      const left = Math.max(8, Math.min(event.clientX + 10, window.innerWidth - menu.offsetWidth - 8));
+      const top = Math.max(8, Math.min(event.clientY + 10, window.innerHeight - menu.offsetHeight - 8));
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    }
+
+    function showThroughDividerContextMenu(event) {
+      const menu = document.getElementById("memberContextMenu");
+      const divider = currentThroughDivider();
+      if (!menu || !divider) return;
+      selectedMemberId = "";
+      selectedJointId = "";
+      selectedMarkupId = "";
+      const title = document.getElementById("memberMenuTitle");
+      const edit = document.getElementById("btnMemberMenuEdit");
+      const remove = document.getElementById("btnMemberMenuDelete");
+      if (title) title.textContent = `${divider.label} · 贯通`;
+      if (edit) edit.textContent = "编辑位置";
+      if (remove) remove.textContent = "删除贯通梃";
       menu.classList.remove("hidden");
       const left = Math.max(8, Math.min(event.clientX + 10, window.innerWidth - menu.offsetWidth - 8));
       const top = Math.max(8, Math.min(event.clientY + 10, window.innerHeight - menu.offsetHeight - 8));
@@ -7063,6 +8957,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const innerW = w - face * 2;
       const innerH = h - face * 2;
       const shapeType = normalizeWindowShape(win.shape).type;
+      const outerPoints = windowOuterShapePoints(win, { x, y, w, h, face });
+      const innerPoints = windowInnerShapePoints(win, { x, y, w, h, face });
+      if (outerPoints.length >= 3 && innerPoints.length >= 3) return polygonFramePath(outerPoints, innerPoints);
       if (shapeType === "arched") {
         const rise = Math.min(h * 0.32, Math.max(face * 1.2, Number(win.shape.archHeightMm || 220) * (w / win.widthMm)));
         const outer = `M${x} ${y + rise} Q${x + w / 2} ${y - rise * 0.75} ${x + w} ${y + rise} L${x + w} ${y + h} L${x} ${y + h} Z`;
@@ -7142,7 +9039,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         return [...arch, { x: halfW, y: -halfH }, { x: -halfW, y: -halfH }];
       }
       if (type === "trapezoid") {
-        const shift = Math.min(width * 0.18, 90 * (width / Math.max(1, win.widthMm)));
+        const shift = shapeTrapezoidShift(width, height, shapeAngleFor(win, type));
         return [
           { x: -halfW + shift, y: halfH },
           { x: halfW, y: halfH },
@@ -7151,7 +9048,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         ];
       }
       if (type === "trapezoid_left") {
-        const shift = Math.min(width * 0.18, 90 * (width / Math.max(1, win.widthMm)));
+        const shift = shapeTrapezoidShift(width, height, shapeAngleFor(win, type));
         return [
           { x: -halfW, y: halfH },
           { x: halfW - shift, y: halfH },
@@ -7160,7 +9057,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         ];
       }
       if (type === "trapezoid_peak") {
-        const peak = Math.min(height * 0.3, Math.max(width * 0.018, 110 * (height / Math.max(1, win.heightMm))));
+        const peak = shapePeakRise(width, height, shapeAngleFor(win, type));
         return [
           { x: -halfW, y: halfH - peak },
           { x: 0, y: halfH },
@@ -7170,21 +9067,21 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         ];
       }
       if (type === "notch_top_left") {
-        const notch = Math.min(width * 0.28, height * 0.32, 130 * (width / Math.max(1, win.widthMm)));
+        const notch = shapeNotchSize(width, height, shapeAngleFor(win, type));
         return [
-          { x: -halfW + notch, y: halfH },
+          { x: -halfW + notch.x, y: halfH },
           { x: halfW, y: halfH },
           { x: halfW, y: -halfH },
           { x: -halfW, y: -halfH },
-          { x: -halfW, y: halfH - notch }
+          { x: -halfW, y: halfH - notch.y }
         ];
       }
       if (type === "notch_top_right") {
-        const notch = Math.min(width * 0.28, height * 0.32, 130 * (width / Math.max(1, win.widthMm)));
+        const notch = shapeNotchSize(width, height, shapeAngleFor(win, type));
         return [
           { x: -halfW, y: halfH },
-          { x: halfW - notch, y: halfH },
-          { x: halfW, y: halfH - notch },
+          { x: halfW - notch.x, y: halfH },
+          { x: halfW, y: halfH - notch.y },
           { x: halfW, y: -halfH },
           { x: -halfW, y: -halfH }
         ];
@@ -7385,12 +9282,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const topEdge = item.y + inset;
       const bottomEdge = item.y + item.h - inset;
       if (cell.type === "top_hung") {
-        const dash = opening.endsWith("out") ? "" : "stroke-dasharray='7 5'";
-        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, topEdge + 14)}<path d="M${leftEdge} ${bottomEdge} L${centerX} ${topEdge} L${rightEdge} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
+        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, topEdge + 14)}<path d="M${leftEdge} ${bottomEdge} L${centerX} ${topEdge} L${rightEdge} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
       }
       if (cell.type === "bottom_hung") {
-        const dash = opening.endsWith("out") ? "" : "stroke-dasharray='7 5'";
-        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, bottomEdge - 8)}<path d="M${leftEdge} ${topEdge} L${centerX} ${bottomEdge} L${rightEdge} ${topEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
+        return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, centerX, bottomEdge - 8)}<path d="M${leftEdge} ${topEdge} L${centerX} ${bottomEdge} L${rightEdge} ${topEdge}" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
       }
       if (["sliding", "lift_slide", "psk", "parallel_slide", "pocket_slide"].includes(cell.type)) {
         const rightward = assembly.stackSide === "right";
@@ -7444,22 +9339,24 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           if (!panel.movable) return `<line x1="${panelLeft}" y1="${topEdge}" x2="${panelLeft}" y2="${bottomEdge}" stroke="#5a747b" stroke-width="1.5" />`;
           const x1 = panel.hingeSide === "left" ? panelLeft : panelRight;
           const x2 = panel.hingeSide === "left" ? panelRight : panelLeft;
-          const dash = assembly.openPlane === "out" ? "" : "stroke-dasharray='7 5'";
           const panelCell = {
             ...cell,
             opening: `${panel.hingeSide}_${assembly.openPlane}`,
             openingAssembly: { ...assembly, panelCount: 1 }
           };
-          return `<g class="opening-symbol">${openingDirectionSvgLabel(panelCell, (panelLeft + panelRight) / 2, topEdge + 14)}<path d="M${x1} ${topEdge} L${x2} ${bottomEdge} L${x1} ${bottomEdge} Z" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
+          return `<g class="opening-symbol">${openingDirectionSvgLabel(panelCell, (panelLeft + panelRight) / 2, topEdge + 14)}<path d="M${x1} ${topEdge} L${x2} ${bottomEdge} L${x1} ${bottomEdge} Z" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
         }).join("");
       }
       const left = opening?.startsWith("left");
-      const out = opening?.endsWith("out");
       const hingeX = left ? item.x + inset : item.x + item.w - inset;
       const openX = left ? item.x + item.w - inset : item.x + inset;
       const hingeY = item.y + item.h / 2;
-      const dash = out ? "" : "stroke-dasharray='7 5'";
-      return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, (hingeX + openX) / 2, topEdge + 14)}<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" ${dash} /></g>`;
+      return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, (hingeX + openX) / 2, topEdge + 14)}<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
+    }
+
+    function sizeRatioLabel(sizeMm, weight, total) {
+      const ratio = total ? Number(weight || 0) / total * 100 : 0;
+      return `${Math.round(sizeMm)} / ${Math.round(ratio)}%`;
     }
 
     function dimensionLine(x1, y1, x2, y2, label, vertical = false, editTarget = "") {
@@ -7477,6 +9374,34 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function renderCustomShapeAnnotations(win, x, y, w, h) {
       const shape = normalizeWindowShape(win.shape);
+      if (shape.type === "arched") {
+        return `<g class="shape-annotation" aria-label="上拱参数">
+          <text class="shape-angle-label" x="${x + w / 2}" y="${y - 62}">拱高 ${Math.round(shape.archHeightMm || 0)} mm</text>
+        </g>`;
+      }
+      if (isAngledWindowShape(shape.type)) {
+        const points = windowOuterShapePoints(win, { x, y, w, h, face: 0 });
+        if (points.length < 3) return "";
+        const pointObjects = points.map(point => ({ x: point[0], y: point[1] }));
+        const centroid = pointObjects.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+        centroid.x /= pointObjects.length;
+        centroid.y /= pointObjects.length;
+        const edgeIndexes = {
+          trapezoid: [1, 2],
+          trapezoid_left: [3, 0],
+          trapezoid_peak: [0, 1],
+          notch_top_left: [4, 0],
+          notch_top_right: [1, 2]
+        }[shape.type] || [0, 1];
+        const start = pointObjects[edgeIndexes[0]];
+        const end = pointObjects[edgeIndexes[1]];
+        const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+        const labelVector = outwardLabelVector(mid, centroid, 22);
+        return `<g class="shape-annotation" aria-label="异形角度">
+          <line class="shape-edge-guide" x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" />
+          <text class="shape-angle-label" x="${mid.x + labelVector.x}" y="${mid.y + labelVector.y}">${Math.round(shape.shapeAngleDeg || defaultShapeAngle(shape.type))}°</text>
+        </g>`;
+      }
       if (shape.type !== "custom_polygon") return "";
       const points = normalizeShapePoints(shape.points);
       if (points.length < 3) return "";
@@ -7880,9 +9805,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       preview3d.controls = new OrbitControls(preview3d.camera, canvas);
       preview3d.controls.enableDamping = true;
       preview3d.controls.dampingFactor = 0.075;
-      preview3d.controls.enablePan = false;
-      preview3d.controls.minPolarAngle = Math.PI * 0.28;
-      preview3d.controls.maxPolarAngle = Math.PI * 0.72;
+      preview3d.controls.enableRotate = true;
+      preview3d.controls.enablePan = true;
+      preview3d.controls.enableZoom = true;
+      preview3d.controls.screenSpacePanning = true;
+      preview3d.controls.minPolarAngle = 0;
+      preview3d.controls.maxPolarAngle = Math.PI;
       preview3d.raycaster = new THREE.Raycaster();
       preview3d.pointer = new THREE.Vector2();
       document.getElementById("previewFallback")?.classList.add("hidden");
@@ -7944,8 +9872,16 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const controls = preview3d.controls;
       if (!indicator || !camera || !controls) return;
       const direction = camera.position.clone().sub(controls.target);
-      const sideRatio = direction.length() > 0 ? direction.z / direction.length() : 1;
-      if (Math.abs(sideRatio) < 0.22) {
+      const length = direction.length();
+      const sideRatio = length > 0 ? direction.z / length : 1;
+      const verticalRatio = length > 0 ? direction.y / length : 0;
+      if (verticalRatio > 0.78) {
+        indicator.textContent = "主立面：俯视观察";
+        indicator.dataset.side = "top";
+      } else if (verticalRatio < -0.78) {
+        indicator.textContent = "主立面：仰视观察";
+        indicator.dataset.side = "bottom";
+      } else if (Math.abs(sideRatio) < 0.22) {
         indicator.textContent = "主立面：侧向观察";
         indicator.dataset.side = "side";
       } else if (sideRatio > 0) {
@@ -8057,6 +9993,35 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       controls.update();
     }
 
+    function setThreePreviewView(viewName) {
+      const THREE = threeLib;
+      const camera = preview3d.camera;
+      const controls = preview3d.controls;
+      const bounds = preview3d.bounds;
+      if (!THREE || !camera || !controls || !bounds || bounds.isEmpty()) return;
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      const distance = Math.max(size.x, size.y, size.z, 1) * 1.85;
+      const directions = {
+        outside: new THREE.Vector3(0, 0.08, 1),
+        inside: new THREE.Vector3(0, 0.08, -1),
+        left: new THREE.Vector3(-1, 0.08, 0),
+        right: new THREE.Vector3(1, 0.08, 0),
+        top: new THREE.Vector3(0.001, 1, 0.001),
+        iso: new THREE.Vector3(0.56, 0.42, 1)
+      };
+      const direction = (directions[viewName] || directions.iso).normalize();
+      controls.target.copy(center);
+      camera.position.copy(center).addScaledVector(direction, distance);
+      camera.near = Math.max(0.01, distance / 100);
+      camera.far = Math.max(100, distance * 20);
+      camera.updateProjectionMatrix();
+      controls.minDistance = distance * 0.18;
+      controls.maxDistance = distance * 5.2;
+      controls.update();
+      updatePreviewViewSide();
+    }
+
     function rebuildThreeWindow(win) {
       const THREE = threeLib;
       const root = preview3d.group;
@@ -8142,6 +10107,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       if (showOrientationLabels && project.viewOptions?.show3dOrientation !== false) {
         addThreeOrientationLabels(model, -width / 2, width, -height / 2, depth, 0, cornerMount);
+      }
+      if (project.viewOptions?.show3dMarkups !== false) {
+        addThreeWindowRootMarkups(frameMount, win, width, height, depth, scale);
       }
 
       const cols = win.layout.columns.length;
@@ -8446,6 +10414,19 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       heightLabel.position.set(rightX + 0.09, 0, z);
       heightLabel.rotation.z = Math.PI / 2;
       parent.add(heightLabel);
+    }
+
+    function addThreeWindowRootMarkups(parent, win, width, height, depth, scale) {
+      const markups = normalizeWindowMarkups(win?.markups);
+      if (!markups.length) return;
+      markups.forEach(markup => {
+        const x = -width / 2 + width * Number(markup.xPercent || 0) / 100;
+        const y = height / 2 - height * Number(markup.yPercent || 0) / 100;
+        const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", Math.max(0.1, Math.min(0.22, height * 0.075)));
+        label.position.set(x, y, depth / 2 + Math.max(0.045, 52 * scale));
+        label.userData.mountType = "window-root-text-annotation";
+        parent.add(label);
+      });
     }
 
     function addThreeCellHostedObjects(parent, cell, rect, mats, options = {}) {
@@ -10353,6 +12334,33 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const placementByWindowId = new Map((assembly?.placements || []).map(placement => [placement.windowId, placement]));
       const renderWindowNode = (win, options = {}) => {
         const cols = win.layout.columns.length;
+        const throughDividerRows = [
+          ...win.layout.columns.slice(0, -1).map((_, index) => ({ axis: "column", index })),
+          ...win.layout.rows.slice(0, -1).map((_, index) => ({ axis: "row", index }))
+        ].map(divider => {
+          const active = selectedDividerMatches(win, divider.axis, divider.index);
+          const weights = divider.axis === "column" ? win.layout.columns : win.layout.rows;
+          const total = sum(weights);
+          const before = total ? weights.slice(0, divider.index + 1).reduce((result, value) => result + Number(value || 0), 0) / total * 100 : 0;
+          return `
+            <div class="object-tree-branch">${objectTreeButton({
+              active,
+              attrs: `data-object-divider-window="${escapeHtml(win.windowId)}" data-object-divider-axis="${escapeHtml(divider.axis)}" data-object-divider-index="${divider.index}"`,
+              label: throughDividerLabel(divider.axis, divider.index),
+              meta: `${Math.round(before)}%`,
+              caret: "•"
+            })}</div>
+          `;
+        }).join("");
+        const rootMarkupRows = normalizeWindowMarkups(win.markups).map(markup => `
+          <div class="object-tree-branch">${objectTreeButton({
+            active: markup.markupId === selectedMarkupId,
+            attrs: `data-object-markup="${escapeHtml(markup.markupId)}" data-object-markup-window="${escapeHtml(win.windowId)}" data-object-markup-host="window"`,
+            label: "文字标注",
+            meta: escapeHtml(markup.text || "文字标注"),
+            caret: "•"
+          })}</div>
+        `).join("");
         const cellRows = win.layout.cells.map((cell, index) => {
           const row = Math.floor(index / cols);
           const col = index % cols;
@@ -10370,16 +12378,30 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
               caret: "•"
             })}</div>
           `).join("");
+          const localMembers = (win.topology?.members || []).filter(member => member.hostRegionId === cell.cellId);
+          const localMemberRows = localMembers.map(member => {
+              const memberIndex = win.topology.members.findIndex(item => item.memberId === member.memberId);
+              return `
+                <div class="object-tree-branch">${objectTreeButton({
+                  active: member.memberId === selectedMemberId,
+                  attrs: `data-object-member-window="${escapeHtml(win.windowId)}" data-object-member="${escapeHtml(member.memberId)}"`,
+                  label: `${escapeHtml(memberLabel(member, memberIndex))} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`,
+                  meta: `${Math.round(Number(member.positionRatio || 0.5) * 100)}%`,
+                  caret: "•"
+                })}</div>
+              `;
+            }).join("");
+          const childRows = `${markupRows}${localMemberRows}`;
           return `
             <div class="object-tree-branch">
               ${objectTreeButton({
                 active,
                 attrs: `data-object-cell-window="${escapeHtml(win.windowId)}" data-object-cell-row="${row}" data-object-cell-col="${col}"`,
                 label: `格 ${row + 1}-${col + 1} · ${escapeHtml(typeLabels[cell.type] || cell.type)}`,
-                meta: markups.length ? `${markups.length}个附属对象` : "无附属对象",
-                caret: markups.length ? "▾" : "•"
+                meta: childRows ? `${markups.length + localMembers.length}个子对象` : "无子对象",
+                caret: childRows ? "▾" : "•"
               })}
-              ${markupRows ? `<div class="object-tree-children">${markupRows}</div>` : ""}
+              ${childRows ? `<div class="object-tree-children">${childRows}</div>` : ""}
             </div>
           `;
         }).join("");
@@ -10388,8 +12410,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           ? `data-object-placement="${escapeHtml(placement.placementId)}"`
           : `data-object-window="${escapeHtml(win.windowId)}"`;
         const activeWindow = placement
-          ? placement.placementId === selectedPlacementId && !selectedJointId && !selectedMarkupId
-          : win.windowId === selectedWindowId && !selectedJointId && !selectedPlacementId && !selectedMarkupId && activeInspectorTab !== "cell";
+          ? placement.placementId === selectedPlacementId && !selectedDivider.windowId && !selectedJointId && !selectedMarkupId
+          : win.windowId === selectedWindowId && !selectedDivider.windowId && !selectedJointId && !selectedPlacementId && !selectedMarkupId && activeInspectorTab !== "cell";
         return `
           <div class="object-tree-branch">
             ${objectTreeButton({
@@ -10399,7 +12421,16 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
               meta: options.meta || `${win.widthMm}×${win.heightMm}`,
               caret: "▾"
             })}
-            <div class="object-tree-children">${cellRows}</div>
+            <div class="object-tree-children">
+              ${rootMarkupRows}
+              ${throughDividerRows ? `
+                <div class="object-tree-branch">
+                  ${objectTreeButton({ label: "贯通中挺", meta: `${win.layout.columns.length + win.layout.rows.length - 2}根`, caret: "▾" })}
+                  <div class="object-tree-children">${throughDividerRows}</div>
+                </div>
+              ` : ""}
+              ${cellRows}
+            </div>
           </div>
         `;
       };
@@ -10466,17 +12497,49 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
     function selectedObjectRows() {
-      const markup = selectedMarkupId ? findCellMarkup(selectedMarkupId) : null;
+      const markup = selectedMarkupId ? findMarkupObject(selectedMarkupId) : null;
       if (markup) {
+        const rootHosted = markup.hostType === "window";
         return {
           title: markup.markup.kind === "text" ? "文字标注" : markupToolLabel(markup.markup.kind),
           rows: [
             ["对象", markup.markup.markupId],
             ["所属窗", markup.win.mark],
-            ["所属格", `${markup.row + 1}行 ${markup.col + 1}列`],
-            ["宿主", markup.markup.hostCellId || markup.cell.cellId],
+            ["所属格", rootHosted ? "窗体根节点" : `${markup.row + 1}行 ${markup.col + 1}列`],
+            ["宿主", rootHosted ? "窗体根节点" : (markup.markup.hostCellId || markup.cell.cellId)],
             ["内容/尺寸", markup.markup.kind === "text" ? markup.markup.text : `${Math.round(markup.markup.sizeMm)} mm`],
             ["位置", `${Math.round(markup.markup.xPercent)}%, ${Math.round(markup.markup.yPercent)}%`]
+          ]
+        };
+      }
+      const divider = currentThroughDivider();
+      if (divider) {
+        return {
+          title: `${divider.label} · 贯通`,
+          rows: [
+            ["所属窗", divider.win.mark],
+            ["方向", divider.axis === "column" ? "竖向" : "横向"],
+            ["整窗位置", `${Math.round(divider.positionPercent)}%`],
+            ["前段尺寸", `${Math.round(divider.beforeMm)} mm`],
+            ["后段尺寸", `${Math.round(divider.afterMm)} mm`],
+            ["调整方式", "画布拖动 / 双击输入"]
+          ]
+        };
+      }
+      const win = currentWindow();
+      const member = currentMember(win);
+      if (win && member) {
+        const memberIndex = win.topology.members.findIndex(item => item.memberId === member.memberId);
+        const host = findMemberHost(win.layout, member);
+        return {
+          title: `${memberLabel(member, memberIndex)} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`,
+          rows: [
+            ["所属窗", win.mark],
+            ["所属格", host ? `${host.row + 1}行 ${host.col + 1}列` : "-"],
+            ["方向", member.orientation === "horizontal" ? "横向" : "竖向"],
+            ["所在位置", `${Math.round(Number(member.positionRatio || 0.5) * 100)}%`],
+            ["范围", `${Math.round(Number(member.span?.startRatio || 0) * 100)}% - ${Math.round(Number(member.span?.endRatio || 1) * 100)}%`],
+            ["调整方式", "画布拖动 / 双击输入"]
           ]
         };
       }
@@ -10511,7 +12574,6 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           ]
         };
       }
-      const win = currentWindow();
       const cell = currentCell(win);
       if (win && cell && activeInspectorTab === "cell") {
         return {
@@ -10581,6 +12643,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const placementButton = event.target.closest("[data-object-placement]");
       const jointButton = event.target.closest("[data-object-joint]");
       const markupButton = event.target.closest("[data-object-markup]");
+      const memberButton = event.target.closest("[data-object-member]");
+      const dividerButton = event.target.closest("[data-object-divider-window]");
       const cellButton = event.target.closest("[data-object-cell-window]");
       const windowButton = event.target.closest("[data-object-window]");
       if (assemblyButton) {
@@ -10588,6 +12652,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedPlacementId = "";
         selectedMemberId = "";
         selectedJointId = "";
+        clearDividerSelection();
         selectedMarkupId = "";
         drawingMode = "assembly";
         switchInspector("assembly");
@@ -10602,6 +12667,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedWindowId = placement.windowId;
         selectedMemberId = "";
         selectedJointId = "";
+        clearDividerSelection();
         selectedMarkupId = "";
         drawingMode = "assembly";
         switchInspector("assembly");
@@ -10614,6 +12680,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedJointId = joint.jointId;
         selectedWindowId = joint.hostWindowId;
         selectedMemberId = "";
+        clearDividerSelection();
         selectedPlacementId = "";
         selectedMarkupId = "";
         drawingMode = hasAssemblyScene() ? "assembly" : "window";
@@ -10622,17 +12689,33 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         return;
       }
       if (markupButton) {
-        selectedWindowId = markupButton.dataset.objectMarkupWindow;
-        selectedMemberId = "";
-        selectedJointId = "";
-        selectedPlacementId = "";
-        selectedMarkupId = markupButton.dataset.objectMarkup || "";
-        selectedCell = {
-          row: Number(markupButton.dataset.objectMarkupRow || 0),
-          col: Number(markupButton.dataset.objectMarkupCol || 0)
-        };
+        selectMarkupObject(markupButton.dataset.objectMarkup || "");
         if (hasAssemblyScene()) drawingMode = "assembly";
-        switchInspector("cell");
+        render();
+        return;
+      }
+      if (memberButton) {
+        const win = project.windows.find(item => item.windowId === memberButton.dataset.objectMemberWindow);
+        const member = win?.topology?.members?.find(item => item.memberId === memberButton.dataset.objectMember);
+        const host = findMemberHost(win?.layout, member);
+        if (!win || !member || !host) return;
+        selectedWindowId = win.windowId;
+        selectedPlacementId = currentProjectAssembly()?.placements?.find(placement => placement.windowId === win.windowId)?.placementId || "";
+        selectedMemberId = member.memberId;
+        selectedJointId = "";
+        selectedMarkupId = "";
+        clearDividerSelection();
+        selectedCell = { row: host.row, col: host.col };
+        if (hasAssemblyScene()) drawingMode = "assembly";
+        switchInspector("member");
+        render();
+        return;
+      }
+      if (dividerButton) {
+        const win = project.windows.find(item => item.windowId === dividerButton.dataset.objectDividerWindow);
+        if (!win) return;
+        selectThroughDivider(win, dividerButton.dataset.objectDividerAxis, Number(dividerButton.dataset.objectDividerIndex || 0));
+        if (hasAssemblyScene()) drawingMode = "assembly";
         render();
         return;
       }
@@ -10641,6 +12724,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedMemberId = "";
         selectedJointId = "";
         selectedPlacementId = "";
+        clearDividerSelection();
         selectedMarkupId = "";
         selectedCell = {
           row: Number(cellButton.dataset.objectCellRow || 0),
@@ -10656,6 +12740,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         selectedMemberId = "";
         selectedJointId = "";
         selectedPlacementId = "";
+        clearDividerSelection();
         selectedMarkupId = "";
         selectedCell = { row: 0, col: 0 };
         if (hasAssemblyScene()) drawingMode = "assembly";
@@ -10674,24 +12759,38 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!Object.keys(data).length) return;
       handleObjectTreeClick({ target: button });
       hideCellContextMenu();
+      hideMemberContextMenu();
       hideJointContextMenu();
       hideAssemblyContextMenu();
       if (data.objectJoint) showJointContextMenu(event, data.objectJoint);
-      else if (data.objectMarkup) showTreeMarkupMenu(event, data.objectMarkup);
+      else if (data.objectMarkup) showMarkupContextMenu(event, data.objectMarkup);
+      else if (data.objectMember) showMemberContextMenu(event, data.objectMember);
+      else if (data.objectDividerWindow) showThroughDividerContextMenu(event);
       else if (data.objectCellWindow) showCellContextMenu(event, Number(data.objectCellRow), Number(data.objectCellCol));
       else showAssemblyContextMenu(event, selectedWindowId, selectedPlacementId);
     }
 
-    function showTreeMarkupMenu(event, markupId) {
-      document.getElementById("treeMarkupMenu")?.remove();
+    function hideMarkupContextMenu() {
+      document.getElementById("markupContextMenu")?.remove();
+    }
+
+    function showMarkupContextMenu(event, markupId) {
+      const found = selectMarkupObject(markupId);
+      if (!found) return;
+      hideCellContextMenu();
+      hideMemberContextMenu();
+      hideJointContextMenu();
+      hideAssemblyContextMenu();
+      hideMarkupContextMenu();
       const menu = document.createElement("div");
-      menu.id = "treeMarkupMenu";
+      menu.id = "markupContextMenu";
       menu.className = "object-menu";
       menu.setAttribute("role", "menu");
-      [["编辑标注", () => openCanvasMarkupEditor(markupId, event)], ["删除标注", deleteWindow]].forEach(([label, action]) => {
+      const label = markupToolLabel(found.markup.kind);
+      [[`编辑${label}`, () => openCanvasMarkupEditor(markupId, event)], [`删除${label}`, deleteSelectedMarkup]].forEach(([text, action]) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = label;
+        button.textContent = text;
         button.setAttribute("role", "menuitem");
         button.addEventListener("click", () => { menu.remove(); action(); });
         menu.append(button);
@@ -11274,7 +13373,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       ["projectId", "projectName", "customerName", "projectPhone", "projectStatus", "projectAddress", "orderId", "batchNo"].forEach(id => {
         bindById(id, "change", updateProjectFromInputs);
       });
-      ["winMark", "winQty", "winWidth", "winHeight", "sillHeight", "winFloor", "winRoom", "winShape", "archHeight", "shapePoints"].forEach(id => {
+      ["winMark", "winQty", "winWidth", "winHeight", "sillHeight", "winFloor", "winRoom", "winShape", "archHeight", "shapeAngle", "shapePoints"].forEach(id => {
         bindById(id, "change", updateWindowFromInputs);
       });
       ["saveInstallLocation", "saveSeriesId", "saveGlassTypeId", "saveColor", "saveOpeningMode", "saveUnitPrice", "saveWindowNote"].forEach(id => {
@@ -11332,6 +13431,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       bindById("projectAssemblySelect", "change", selectProjectAssemblyFromInput);
       [
         "surroundEnabled",
+        "installationSillHeight",
         "installationMountingMode",
         "installationFrameAlignment",
         "surroundStyle",
@@ -11362,6 +13462,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         "assemblyPrimarySide",
         "assemblyMullionMode",
         "assemblyOpenPlane",
+        "assemblyOpenPercent",
         "assemblyOperationPriority",
         "assemblyVentilationMode",
         "assemblyTrafficDoor",
@@ -11424,6 +13525,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       });
       bindById("btnConfirm", "click", confirmBom);
       bindById("btnFreeze", "click", freezeBom);
+      bindById("btnUndoProject", "click", undoProjectEdit);
+      bindById("btnRedoProject", "click", redoProjectEdit);
       bindById("btnNewWindow", "click", newWindow);
       bindById("btnTextAnnotation", "click", () => startCellMarkupPlacement("text"));
       bindById("btnCircleHole", "click", () => startCellMarkupPlacement("circle_hole"));
@@ -11523,6 +13626,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       });
       document.querySelectorAll("[data-joint-position]").forEach(btn => {
         btn.addEventListener("click", () => chooseJointPosition(btn.dataset.jointPosition));
+      });
+      bindById("btnCloseShapePlacement", "click", closeShapePlacementDialog);
+      bindById("shapePlacementDialog", "click", event => {
+        if (event.target === event.currentTarget) closeShapePlacementDialog();
+      });
+      document.querySelectorAll("[data-shape-placement]").forEach(btn => {
+        btn.addEventListener("click", () => chooseShapePlacement(btn.dataset.shapePlacement));
       });
       document.querySelectorAll("[data-joint-angle]").forEach(btn => {
         btn.addEventListener("click", () => setJointAngleFromMenu(btn.dataset.jointAngle));
@@ -11628,6 +13738,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         btn.addEventListener("click", () => applyCellMenuAction(btn.dataset.cellMenuAction));
       });
       bindById("btnResetView", "click", () => fitThreePreview(true));
+      document.querySelectorAll("[data-preview-view]").forEach(button => {
+        button.addEventListener("click", () => setThreePreviewView(button.dataset.previewView || "iso"));
+      });
       bindById("btnClosePreview", "click", closePreviewDialog);
       bindById("previewDialog", "close", closePreviewDialog);
       bindById("previewDialog", "click", event => {
@@ -11682,12 +13795,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       bindById("btnPreviewMenuEdit", "click", editPreviewContextPart);
       bindById("btnCellMenuEdit", "click", hideCellContextMenu);
       bindById("btnCellMenuPreview", "click", previewSelectedCell);
-      bindById("btnDeleteMember", "click", deleteSelectedMember);
-      bindById("btnMemberMenuEdit", "click", () => {
+      bindById("btnDeleteMember", "click", deleteSelectedMullion);
+      bindById("btnMemberMenuEdit", "click", event => {
         hideMemberContextMenu();
-        switchInspector("member");
+        editSelectedMullionFromMenu(event);
       });
-      bindById("btnMemberMenuDelete", "click", deleteSelectedMember);
+      bindById("btnMemberMenuDelete", "click", deleteSelectedMullion);
       bindById("btnDeleteJoint", "click", deleteSelectedJoint);
       bindById("btnJointMenuDelete", "click", deleteSelectedJoint);
       bindById("btnDeletePlacement", "click", deleteSelectedPlacement);
@@ -11710,6 +13823,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           hideMemberContextMenu();
           hideJointContextMenu();
           hideAssemblyContextMenu();
+          hideMarkupContextMenu();
         }
       });
       window.addEventListener("resize", () => {
@@ -11718,6 +13832,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         hideMemberContextMenu();
         hideJointContextMenu();
         hideAssemblyContextMenu();
+        hideMarkupContextMenu();
       });
       bindById("btnExportBom", "click", exportBom);
       bindById("btnAddSeries", "click", addSeries);
@@ -11732,6 +13847,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         if (file) importJsonFile(file);
         event.target.value = "";
       });
+      document.addEventListener("keydown", handleHistoryShortcut);
     }
 
     function boot() {
