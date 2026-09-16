@@ -19,16 +19,19 @@ function context(extra = {}, names = []) {
     ...assemblies, ...openings, ...joints, Math, Number, Set, Map,
     project: { windows: [], joints: [], assemblies: [], viewOptions: { showOpenState: true, showPlanView: true } },
     selectedWindowId: "A", selectedJointId: "J", selectedPlacementId: "", selectedMemberId: "", selectedMarkupId: "",
+    selectedDivider: { windowId: "", axis: "", index: -1 },
     selectedAssemblyId: "AS", selectedCell: { row: 0, col: 0 }, activeInspectorTab: "joint", drawingMode: "assembly",
     canvasCommand: { mode: "" }, activeModule: "design", bom: null,
     currentSeries: () => ({ faceWidthMm: 70, frameDepthMm: 70 }),
-    hideJointContextMenu: noop, markDirty: noop, showToast: noop,
+    hideJointContextMenu: noop, markDirty: noop, showToast: noop, updateHistoryControls: noop,
     sum: values => values.reduce((a, b) => a + b, 0), cellIndex: (r, c, cols) => r * cols + c,
     escapeHtml: value => String(value ?? ""), setValue: noop,
     ...extra
   });
   ctx.currentJoint = () => ctx.project.joints.find(j => j.jointId === ctx.selectedJointId);
   ctx.switchInspector = tab => { ctx.activeInspectorTab = tab; };
+  ctx.clearDividerSelection = () => { ctx.selectedDivider = { windowId: "", axis: "", index: -1 }; };
+  ctx.currentThroughDivider = () => null;
   names.forEach(name => vm.runInContext(appFunction(name), ctx));
   return ctx;
 }
@@ -88,7 +91,7 @@ for (const width of [10, 50, 100, 300]) {
   assert.equal(boxes[0].parent.position.x - boxes[0].w / 2, .6, "3D connector must begin at the host frame edge");
 }
 
-const planFunctions = ["computeCellRects", "rectsToEdges", "assemblyPlanPoint", "assemblyPlanFootprint", "assemblyPlanOpenings", "buildPlanOpeningParts", "renderPlanCellTracks", "renderPlanPanelProjection", "renderPlanFoldingProjection", "renderPlanMotionGuide", "planProjectionPoints", "renderAssemblyPlanView"];
+const planFunctions = ["computeCellRects", "rectsToEdges", "cellOpeningRatio", "assemblyPlanPoint", "assemblyPlanFootprint", "assemblyPlanOpenings", "buildPlanOpeningParts", "renderPlanCellTracks", "renderPlanPanelProjection", "renderPlanFoldingProjection", "renderPlanMotionGuide", "planProjectionPoints", "renderAssemblyPlanView"];
 for (const type of ["turn", "turn_tilt", "top_hung", "bottom_hung", "sliding", "lift_slide", "psk", "parallel_slide", "parallel_project", "pocket_slide", "corner_slide", "vertical_slide", "folding"]) {
   const ctx = context({ project: fixture(), dimensionLine: () => "", normalizePlanVector: vector => vector }, planFunctions);
   const item = { window: windowObject("B", 1000, type), windowId: "B", xMm: 1400, zMm: 500, rotationDeg: 90 };
@@ -110,7 +113,7 @@ const renderNames = ["renderInputs", "renderSvg", "renderCellPalette", "renderCu
 const global = context({ project: fixture(), normalizeProject: p => p, calculateProjectBom: () => ({}),
   ...Object.fromEntries(renderNames.map(name => [name, noop]))
 }, ["render", "hasAssemblyScene", "syncAssemblyJointConnections"]);
-for (const mode of ["apply_cell_preset", "add_cell_markup", "add_joint", "add_window_from_joint", ""]) {
+for (const mode of ["apply_cell_preset", "add_cell_markup", "add_root_markup", "add_joint", "add_window_from_joint", ""]) {
   global.drawingMode = "window";
   global.canvasCommand = { mode };
   global.render();
@@ -121,13 +124,17 @@ const svg = { setAttribute: noop, querySelectorAll: () => [], addEventListener: 
 let rendered = "";
 const selection = context({ project: fixture(), document: { getElementById: () => ({}) },
   dimensionLine: () => "", cellFill: () => "#e3f3fa", cellDecoration: () => "", integratedScreenDecoration: () => "",
-  cellDrawingCode: () => "F1", renderCellMarkups: () => "", bindCanvasMarkupPlacement: noop, bindCanvasGeometryDrag: noop,
+  cellDrawingCode: () => "F1", renderCellMarkups: () => "", renderWindowRootMarkups: () => "", bindCanvasMarkupPlacement: noop, bindCanvasGeometryDrag: noop,
   frameShapePath: () => "M0 0Z", profileColor: () => "#7e8792", openCellElevation: () => "<g class=\"open-sash-elevation\"></g>",
+  cellRenderItemWithShape: (_, item) => item, renderWindowFrameOcclusion: () => "", windowInnerFillPath: () => "",
+  renderAssemblyWindowInternalDimensions: () => "", renderCustomShapeAnnotations: () => "",
   openingSymbol: () => "", renderProfileBevel: () => "", renderProfileDividerBevel: () => "",
-  renderAssemblyCommandZones: () => "", setCanvasSvgContent: (_, parts) => { rendered = parts.join(""); }
+  renderThroughMullions: () => "", renderTopologyMembers: () => "", bindAssemblyTopologyMembers: noop,
+  bindCanvasMarkupContextMenus: noop, renderAssemblyCommandZones: () => "", setCanvasSvgContent: (_, parts) => { rendered = parts.join(""); }
 }, [...planFunctions, "svgPlanDefs", "resolveAssemblyElevationLayout", "renderWindowGeometryHandles", "renderAssemblyWindowCells", "renderAssemblyInternalJointZones", "renderAssemblySvg"]);
 selection.currentProjectAssembly = () => selection.project.assemblies[0];
 selection.renderAssemblySvg(svg);
+assert.match(rendered, /assembly-sill-height-label[^>]*>台高 0 mm</, "Assembly elevation must show the shared sill-height label");
 assert.match(rendered, /class="assembly-elevation-joint selected"/);
 assert.match(rendered, /assembly-plan-joint-group splice selected/);
 assert.doesNotMatch(rendered, /class="assembly-window selected"|class="assembly-plan-window selected"|class="selected-stroke"/, "Selecting a joint must not highlight its host frame or glass");
@@ -141,7 +148,7 @@ assert.match(rendered, /class="assembly-plan-window selected"/);
 
 // Reuse the actual tree click/context dispatch and retain expansion across renders.
 const tree = context({ project: fixture(), collapsedObjectBranches: new Set(), renderObjectTree: noop, render: noop,
-  hideCellContextMenu: noop, hideAssemblyContextMenu: noop
+  hideCellContextMenu: noop, hideMemberContextMenu: noop, hideAssemblyContextMenu: noop
 }, ["hasAssemblyScene", "handleObjectTreeClick", "handleObjectTreeContextMenu"]);
 let menuJoint = "";
 tree.showJointContextMenu = (_, id) => { menuJoint = id; };

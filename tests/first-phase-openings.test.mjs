@@ -49,6 +49,7 @@ assert.ok(schema.$defs.openingAssembly, "schema should define opening assemblies
   "assemblyPrimarySide",
   "assemblyMullionMode",
   "assemblyOpenPlane",
+  "assemblyOpenPercent",
   "assemblyOperationPriority",
   "assemblyVentilationMode",
   "assemblyTrafficDoor",
@@ -57,6 +58,7 @@ assert.ok(schema.$defs.openingAssembly, "schema should define opening assemblies
   "assemblyCornerPostMode",
   "assemblyPocketDepth"
 ].forEach(id => assert.ok(html.includes(`id="${id}"`), `${id} should be present in the selected-component inspector`));
+assert.ok(schema.$defs.openingAssembly.properties.openPercent, "opening assemblies should persist a manually adjusted 2D opening percentage");
 
 for (const [type, opening] of cases) {
   const options = openingOptionsForType(type);
@@ -92,7 +94,7 @@ for (const [type, opening] of cases) {
 }
 
 const assemblyOverrides = {
-  turn: { panelCount: 2, activePanelCount: 2, primarySide: "right", mullionMode: "flying_mullion", screenMode: "swing" },
+  turn: { panelCount: 2, activePanelCount: 2, primarySide: "right", mullionMode: "flying_mullion", screenMode: "swing", openPercent: 65 },
   turn_tilt: { operationPriority: "tilt_first", ventilationMode: "micro" },
   sliding: { panelCount: 6, activePanelCount: 4, trackCount: 4, stackSide: "both", screenMode: "sliding" },
   lift_slide: { panelCount: 4, activePanelCount: 3, trackCount: 3, stackSide: "right" },
@@ -110,6 +112,7 @@ const cells = cases.map(([type, opening]) => ({
 }));
 
 assert.deepEqual(cells[0].openingAssembly.operationSequence, ["P2", "P1"], "right master sash should operate before the left secondary sash");
+assert.equal(cells[0].openingAssembly.openPercent, 65, "opening assemblies should preserve manually adjusted 2D opening amount");
 assert.equal(cells[4].openingAssembly.panelCount, 6, "sliding assemblies should support six panels");
 assert.equal(cells[4].openingAssembly.trackCount, 4, "sliding assemblies should support four tracks");
 assert.deepEqual(cells[4].openingAssembly.operationSequence, ["P3", "P2", "P4", "P5"], "double-stack sliding should open from the center toward both fixed outer panels");
@@ -124,6 +127,7 @@ assert.equal(cellByType.corner_slide.openingAssembly.cornerAngleDeg, 135, "corne
 assert.equal(cellByType.corner_slide.openingAssembly.cornerPostMode, "postless", "corner sliding should preserve postless construction");
 assert.equal(cellByType.pocket_slide.openingAssembly.pocketDepthMm, 1200, "pocket sliding should preserve the wall-cavity depth");
 assert.match(openingAssemblySummary("folding", cellByType.folding.openingAssembly), /8扇.*双向收.*卷轴纱/);
+assert.match(openingAssemblySummary("turn", cells[0].openingAssembly), /开启65%/);
 assert.match(openingAssemblySummary("corner_slide", cellByType.corner_slide.openingAssembly), /135°转角.*无转角柱/);
 const project = {
   catalog: structuredClone(defaultCatalog),

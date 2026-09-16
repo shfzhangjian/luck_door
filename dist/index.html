@@ -6,7 +6,7 @@
   <title>朗科云设计</title>
   <meta name="description" content="朗科云设计门窗可视化设计、算料和BOM输出工作台" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230f766e'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M32 14v36M14 31h36' stroke='%23f59e0b' stroke-width='5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="assets/app.css?v=20260915-01" />
+  <link rel="stylesheet" href="assets/app.css?v=20260915-25" />
   <script type="importmap">
     {
       "imports": {
@@ -62,7 +62,7 @@
           <div class="tool-library-head">
             <div>
               <h2>绘图工具</h2>
-              <span>先选工具，再到画布已有窗框或区域上点击放置</span>
+              <span>空画布点门/窗框直接生成；构件需点已有区域</span>
             </div>
             <input id="toolSearch" type="search" placeholder="搜索框、梃、开启方式" aria-label="搜索绘图工具" />
           </div>
@@ -294,6 +294,11 @@
 
       <section class="design">
         <div class="design-toolbar">
+          <div class="toolbar-group" aria-label="编辑命令">
+            <button id="btnUndoProject" class="toolbar-action" disabled><span class="button-icon" aria-hidden="true">↶</span><span>撤销</span></button>
+            <button id="btnRedoProject" class="toolbar-action" disabled><span class="button-icon" aria-hidden="true">↷</span><span>重做</span></button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
           <div class="toolbar-group" aria-label="门窗文件">
             <button id="btnNewWindow" class="primary hidden" aria-hidden="true" tabindex="-1">新建门窗</button>
             <button id="btnDuplicateWindow" class="toolbar-action"><span class="button-icon" aria-hidden="true">⧉</span><span>复制</span></button>
@@ -394,6 +399,7 @@
                 </select>
               </label>
               <label>上拱高度 mm<input id="archHeight" type="number" min="0" step="10" /></label>
+              <label class="hidden">异形角度 °<input id="shapeAngle" type="number" min="10" max="88" step="1" /></label>
               <label id="shapePointsField" class="field-wide">DIY点位 %
                 <textarea id="shapePoints" rows="3" spellcheck="false" placeholder="0,20 50,0 100,20 100,100 0,100"></textarea>
               </label>
@@ -445,6 +451,7 @@
               <svg id="installationDetailPreview" viewBox="0 0 280 180" role="img" aria-label="包套安装截面预览"></svg>
             </div>
             <div class="form-grid one">
+              <label>台高 mm<input id="installationSillHeight" type="number" min="0" step="10" /></label>
               <label>安装方式
                 <select id="installationMountingMode">
                   <option value="opening">洞口内安装</option>
@@ -626,12 +633,13 @@
                       <option value="flying_mullion">假中梃/无中梃</option>
                     </select>
                   </label>
-                  <label data-assembly-field="openPlane">折叠方向
+                  <label data-assembly-field="openPlane">开向平面
                     <select id="assemblyOpenPlane">
-                      <option value="in">向室内折</option>
-                      <option value="out">向室外折</option>
+                      <option value="in">向室内</option>
+                      <option value="out">向室外</option>
                     </select>
                   </label>
+                  <label data-assembly-field="openPercent">开启幅度 %<input id="assemblyOpenPercent" type="number" min="0" max="100" step="5" /></label>
                   <label data-assembly-field="operationPriority">执手逻辑
                     <select id="assemblyOperationPriority">
                       <option value="turn_first">平开优先</option>
@@ -901,7 +909,7 @@
           </div>
           <div class="preview-actions">
             <span id="previewViewSide" class="preview-view-side">主立面：室外侧观察</span>
-            <span class="preview-help">点击构件选择，右键菜单，拖动旋转视角</span>
+            <span class="preview-help">拖动旋转，右键/双指平移，滚轮缩放</span>
             <button id="btnResetView" class="ghost">复位视角</button>
             <button id="btnClosePreview">关闭</button>
           </div>
@@ -936,6 +944,17 @@
                 <label><input id="previewShowDimensions" type="checkbox" checked />尺寸</label>
                 <label><input id="previewShowMarkups" type="checkbox" checked />标注/孔位/锁具</label>
                 <label><input id="previewShowOrientation" type="checkbox" checked />室内/室外</label>
+              </div>
+            </section>
+            <section class="preview-control-section">
+              <div class="preview-section-title"><strong>快捷视角</strong></div>
+              <div class="preview-view-presets" aria-label="3D快捷视角">
+                <button type="button" data-preview-view="outside">外侧</button>
+                <button type="button" data-preview-view="inside">内侧</button>
+                <button type="button" data-preview-view="left">左侧</button>
+                <button type="button" data-preview-view="right">右侧</button>
+                <button type="button" data-preview-view="top">俯视</button>
+                <button type="button" data-preview-view="iso">等轴</button>
               </div>
             </section>
             <label>开启方式
@@ -1009,6 +1028,27 @@
         <button data-joint-position="right" class="position-right" type="button">右方</button>
         <button data-joint-position="bottom" class="position-bottom" type="button">下方</button>
         <button data-joint-position="free" class="position-free" type="button">自由</button>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="shapePlacementDialog" class="joint-position-dialog shape-placement-dialog" aria-labelledby="shapePlacementTitle">
+    <div class="joint-position-shell">
+      <header class="joint-position-head">
+        <div>
+          <h2 id="shapePlacementTitle">选择窗框操作</h2>
+          <span id="shapePlacementSubtitle">请选择替换当前窗框，或在上下左右新增窗框。</span>
+        </div>
+        <button id="btnCloseShapePlacement" type="button" aria-label="关闭">×</button>
+      </header>
+      <div class="shape-placement-actions">
+        <button data-shape-placement="replace" class="shape-placement-replace" type="button">替换当前</button>
+        <div class="position-grid">
+          <button data-shape-placement="top" class="position-top" type="button">上方新增</button>
+          <button data-shape-placement="left" class="position-left" type="button">左方新增</button>
+          <div class="position-center">当前窗框</div>
+          <button data-shape-placement="right" class="position-right" type="button">右方新增</button>
+          <button data-shape-placement="bottom" class="position-bottom" type="button">下方新增</button>
+        </div>
       </div>
     </div>
   </dialog>
@@ -1337,10 +1377,10 @@
     <button id="btnCellMenuEdit" role="menuitem">编辑构件属性</button>
     <button id="btnCellMenuPreview" role="menuitem">在3D中查看</button>
   </div>
-  <div id="memberContextMenu" class="object-menu member-object-menu hidden" role="menu" aria-label="局部中梃操作">
-    <div id="memberMenuTitle" class="object-menu-title">局部中梃</div>
-    <button id="btnMemberMenuEdit" role="menuitem">编辑局部梃</button>
-    <button id="btnMemberMenuDelete" class="danger" role="menuitem">删除局部梃</button>
+  <div id="memberContextMenu" class="object-menu member-object-menu hidden" role="menu" aria-label="中梃操作">
+    <div id="memberMenuTitle" class="object-menu-title">中梃</div>
+    <button id="btnMemberMenuEdit" role="menuitem">编辑位置</button>
+    <button id="btnMemberMenuDelete" class="danger" role="menuitem">删除中梃</button>
   </div>
   <div id="jointContextMenu" class="object-menu joint-object-menu hidden" role="menu" aria-label="连接节点操作">
     <div id="jointMenuTitle" class="object-menu-title">连接节点</div>
@@ -1392,6 +1432,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260915-01"></script>
+  <script type="module" src="assets/app.js?v=20260915-25"></script>
 </body>
 </html>

@@ -172,6 +172,7 @@ export function defaultOpeningAssembly(type, opening) {
     cornerAngleDeg: 90,
     cornerPostMode: "postless",
     pocketDepthMm: 0,
+    openPercent: 80,
     panels: [],
     operationSequence: []
   };
@@ -238,6 +239,7 @@ export function normalizeOpeningAssembly(type, opening, value = {}) {
   next.cornerAngleDeg = Math.min(180, Math.max(60, Number(next.cornerAngleDeg) || 90));
   next.cornerPostMode = ["post", "postless"].includes(next.cornerPostMode) ? next.cornerPostMode : "postless";
   next.pocketDepthMm = Math.min(4000, Math.max(0, Math.round(Number(next.pocketDepthMm) || 0)));
+  next.openPercent = Math.min(100, Math.max(0, Math.round(Number(next.openPercent ?? base.openPercent) || 0)));
   if (type === "parallel_slide") next.operationPriority = "slide_first";
   return buildAssemblyPanels(type, opening, next, value.panels);
 }
@@ -318,6 +320,7 @@ export function openingAssemblySummary(type, assembly) {
   if (type === "psk") parts.push(assembly.operationPriority === "tilt_first" ? "内倒优先" : "平移优先");
   if (type === "corner_slide") parts.push(`${assembly.cornerAngleDeg}°转角`, assembly.cornerPostMode === "postless" ? "无转角柱" : "带转角柱");
   if (type === "pocket_slide") parts.push(assembly.pocketDepthMm > 0 ? `墙腔${assembly.pocketDepthMm}mm` : "墙腔自动");
+  if (Number.isFinite(Number(assembly.openPercent))) parts.push(`开启${Math.round(assembly.openPercent)}%`);
   if (assembly.ventilationMode !== "none") parts.push({ tilt: "内倒通风", micro: "微通风", night: "夜间通风" }[assembly.ventilationMode]);
   if (assembly.screenMode !== "none") parts.push({ fixed: "固定纱", swing: "平开纱", sliding: "推拉纱", retractable: "卷轴纱" }[assembly.screenMode]);
   return parts.filter(Boolean).join(" · ");
