@@ -10903,9 +10903,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function threeOpeningSashBounds(pocket, rect, options = {}) {
       const shaped = Boolean(options.shaped);
       const clearance = Math.max(
-        0.006,
-        rect.face * (shaped ? 0.16 : 0.32),
-        pocket.face * (shaped ? 0.52 : 0.72)
+        0.003,
+        rect.face * (shaped ? 0.055 : 0.065),
+        pocket.face * (shaped ? 0.12 : 0.16)
       );
       return {
         x: pocket.x,

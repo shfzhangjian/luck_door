@@ -146,6 +146,8 @@ assert.ok(
   app.includes("function threeSashClosedCenterZ(rect, pocket, hingeZ)") &&
   app.includes("function threeSashHardwareZ(rect, pocket, hingeZ)") &&
   app.includes("function threeOpeningSashBounds(pocket, rect, options = {})") &&
+  app.includes("rect.face * (shaped ? 0.055 : 0.065)") &&
+  app.includes("pocket.face * (shaped ? 0.12 : 0.16)") &&
   app.includes("pocket.w - clearance * 2") &&
   app.includes("pocket.h - clearance * 2") &&
   app.includes("const sashBounds = threeOpeningSashBounds(pocket, rect") &&
