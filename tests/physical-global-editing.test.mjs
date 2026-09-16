@@ -140,14 +140,22 @@ assert.ok(
   app.includes("function threeOperablePocket(rect, options = {})") &&
   app.includes("function addThreeFrameRebate(parent, rect, mats, options = {})") &&
   app.includes('userData.mountType = "frame-rebate-stop"') &&
-  app.includes("hingeRoot.position.set(hingeX, pocket.y, pocket.z)") &&
-  app.includes("hingeRoot.position.set(pocket.x, hingeY, pocket.z)") &&
+  app.includes("function threeOpeningPlaneZ(cell, rect, assembly = null, pocket = null)") &&
+  app.includes("rect.depth / 2 - sashDepth / 2 - clearance") &&
+  app.includes("function threeSashHardwareZ(rect, pocket, hingeZ)") &&
+  app.includes("const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket)") &&
+  app.includes("const hardwareZ = threeSashHardwareZ(rect, pocket, hingeZ)") &&
+  app.includes("hingeRoot.position.set(hingeX, pocket.y, hingeZ)") &&
+  app.includes("hingeRoot.position.set(pocket.x, hingeY, hingeZ)") &&
   app.includes("addSashFrame(sash, 0, 0, sashWidth, sashHeight, pocket.face, pocket.depth, mats.profile)") &&
   app.includes('hingeRoot.userData.mountType = "side-hinged-mechanism"') &&
   app.includes('hingeAxis: "side"') &&
+  app.includes("hardwareZ: support.hardwareZ") &&
+  app.includes("addHandle(sash, (left ? 1 : -1) * sashWidth * 0.34, 0, hardwareZ") &&
+  app.includes("addHorizontalHandle(sash, 0, handleY, hardwareZ") &&
   app.includes('addFixedVerticalHingePlates') &&
   app.includes("function ensurePreviewPartSelection()"),
-  "3D sash geometry must sit in a frame rebate pocket, stay selected by default, and rotate from a frame-mounted hinge mechanism."
+  "3D sash geometry must sit in a frame rebate pocket, stay selected by default, and rotate from a frame-mounted hinge mechanism on the correct indoor/outdoor rebate plane."
 );
 assert.ok(
   app.includes("function primaryOpenableForCell") &&
@@ -162,7 +170,7 @@ assert.ok(
   app.includes("function threeCellShapeData(cell, rect)") &&
   app.includes("addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly)") &&
   app.includes("frameShape: true") &&
-  app.includes("tightShape: shapeData.frameShape") &&
+  app.includes("embeddedShape: shapeData.frameShape") &&
   app.includes("suppressRectStops: shapeData.frameShape") &&
   app.includes("function addThreeShapeRebateStops") &&
   app.includes('userData.mountType = "shape-frame-rebate-stop"') &&
