@@ -9375,6 +9375,185 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	      };
 	    }
 
+    function cleanThreePolygonPoints(points, epsilon = 0.000001) {
+      const cleaned = [];
+      for (const point of points || []) {
+        if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) continue;
+        const previous = cleaned[cleaned.length - 1];
+        if (previous && Math.abs(previous.x - point.x) < epsilon && Math.abs(previous.y - point.y) < epsilon) continue;
+        cleaned.push({ x: point.x, y: point.y });
+      }
+      const first = cleaned[0];
+      const last = cleaned[cleaned.length - 1];
+      if (first && last && cleaned.length > 1 && Math.abs(first.x - last.x) < epsilon && Math.abs(first.y - last.y) < epsilon) {
+        cleaned.pop();
+      }
+      return cleaned;
+    }
+
+    function clipThreePolygonBoundary(points, inside, intersect) {
+      if (!points.length) return [];
+      const output = [];
+      for (let index = 0; index < points.length; index += 1) {
+        const current = points[index];
+        const previous = points[(index + points.length - 1) % points.length];
+        const currentInside = inside(current);
+        const previousInside = inside(previous);
+        if (currentInside) {
+          if (!previousInside) output.push(intersect(previous, current));
+          output.push(current);
+        } else if (previousInside) {
+          output.push(intersect(previous, current));
+        }
+      }
+      return cleanThreePolygonPoints(output);
+    }
+
+    function clipThreePolygonToBox(points, left, right, bottom, top) {
+      const epsilon = 0.000001;
+      let clipped = cleanThreePolygonPoints(points);
+      clipped = clipThreePolygonBoundary(
+        clipped,
+        point => point.x >= left - epsilon,
+        (a, b) => {
+          const ratio = (left - a.x) / ((b.x - a.x) || epsilon);
+          return { x: left, y: a.y + (b.y - a.y) * ratio };
+        }
+      );
+      clipped = clipThreePolygonBoundary(
+        clipped,
+        point => point.x <= right + epsilon,
+        (a, b) => {
+          const ratio = (right - a.x) / ((b.x - a.x) || epsilon);
+          return { x: right, y: a.y + (b.y - a.y) * ratio };
+        }
+      );
+      clipped = clipThreePolygonBoundary(
+        clipped,
+        point => point.y >= bottom - epsilon,
+        (a, b) => {
+          const ratio = (bottom - a.y) / ((b.y - a.y) || epsilon);
+          return { x: a.x + (b.x - a.x) * ratio, y: bottom };
+        }
+      );
+      clipped = clipThreePolygonBoundary(
+        clipped,
+        point => point.y <= top + epsilon,
+        (a, b) => {
+          const ratio = (top - a.y) / ((b.y - a.y) || epsilon);
+          return { x: a.x + (b.x - a.x) * ratio, y: top };
+        }
+      );
+      return cleanThreePolygonPoints(clipped);
+    }
+
+    function threePolygonArea(points) {
+      if (!Array.isArray(points) || points.length < 3) return 0;
+      let area = 0;
+      for (let index = 0; index < points.length; index += 1) {
+        const current = points[index];
+        const next = points[(index + 1) % points.length];
+        area += current.x * next.y - next.x * current.y;
+      }
+      return Math.abs(area) / 2;
+    }
+
+    function threeClipIsFullBox(points, left, right, bottom, top) {
+      if (!Array.isArray(points) || points.length !== 4) return false;
+      const width = Math.max(0.001, right - left);
+      const height = Math.max(0.001, top - bottom);
+      const tolerance = Math.max(width, height) * 0.0015;
+      const corners = [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom }
+      ];
+      return corners.every(corner => points.some(point => Math.abs(point.x - corner.x) <= tolerance && Math.abs(point.y - corner.y) <= tolerance));
+    }
+
+    function windowShapeClipForThreeCell(win, shapePoints, box) {
+      if (!shapePoints?.length) return { visible: true, shapeData: null };
+      const clipped = clipThreePolygonToBox(shapePoints, box.left, box.right, box.bottom, box.top);
+      const minArea = Math.max(0.000001, (box.right - box.left) * (box.top - box.bottom) * 0.01);
+      if (clipped.length < 3 || threePolygonArea(clipped) < minArea) return { visible: false, shapeData: null };
+      if (threeClipIsFullBox(clipped, box.left, box.right, box.bottom, box.top)) return { visible: true, shapeData: null };
+      const shape = normalizeWindowShape(win.shape);
+      const width = Math.max(0.001, box.right - box.left);
+      const height = Math.max(0.001, box.top - box.bottom);
+      const points = normalizeShapePoints(clipped.map(point => ({
+        x: Math.round(((point.x - box.left) / width) * 1000) / 10,
+        y: Math.round(((box.top - point.y) / height) * 1000) / 10
+      })));
+      if (points.length < 3) return { visible: false, shapeData: null };
+      return {
+        visible: true,
+        shapeData: {
+          shapeId: `${win.windowId || "window"}-cell-shape-${box.row}-${box.col}`,
+          name: shapeLabel(shape.type),
+          shapeType: shape.type,
+          angleDeg: Math.round(shape.shapeAngleDeg || defaultShapeAngle(shape.type)),
+          frameShape: true,
+          points
+        }
+      };
+    }
+
+    function threeCellShapeWorldPoints(win, host, left, right, bottom, top, windowShapePoints) {
+      const cellShape = normalizeCellCustomShape(host?.cell?.customShape);
+      if (cellShape?.points?.length >= 3) {
+        return cellShape.points.map(point => ({
+          x: left + point.x / 100 * (right - left),
+          y: top - point.y / 100 * (top - bottom)
+        }));
+      }
+      if (!windowShapePoints?.length) return null;
+      const clipped = clipThreePolygonToBox(windowShapePoints, left, right, bottom, top);
+      if (clipped.length < 3 || threeClipIsFullBox(clipped, left, right, bottom, top)) return null;
+      return clipped;
+    }
+
+    function dedupeSortedNumbers(values, epsilon = 0.000001) {
+      const result = [];
+      values
+        .filter(value => Number.isFinite(value))
+        .sort((left, right) => left - right)
+        .forEach(value => {
+          if (!result.length || Math.abs(result[result.length - 1] - value) > epsilon) result.push(value);
+        });
+      return result;
+    }
+
+    function threePolygonLineRange(points, axis, value) {
+      if (!Array.isArray(points) || points.length < 3) return null;
+      const epsilon = 0.000001;
+      const values = [];
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        if (axis === "horizontal") {
+          if (Math.abs(start.y - end.y) < epsilon) {
+            if (Math.abs(value - start.y) < epsilon) values.push(start.x, end.x);
+            continue;
+          }
+          if (value < Math.min(start.y, end.y) - epsilon || value > Math.max(start.y, end.y) + epsilon) continue;
+          const ratio = (value - start.y) / (end.y - start.y);
+          values.push(start.x + (end.x - start.x) * ratio);
+        } else {
+          if (Math.abs(start.x - end.x) < epsilon) {
+            if (Math.abs(value - start.x) < epsilon) values.push(start.y, end.y);
+            continue;
+          }
+          if (value < Math.min(start.x, end.x) - epsilon || value > Math.max(start.x, end.x) + epsilon) continue;
+          const ratio = (value - start.x) / (end.x - start.x);
+          values.push(start.y + (end.y - start.y) * ratio);
+        }
+      }
+      const sorted = dedupeSortedNumbers(values);
+      if (sorted.length < 2) return null;
+      return { start: sorted[0], end: sorted[sorted.length - 1] };
+    }
+
     function cellHasCustomShape(win, row, col) {
       const cols = win?.layout?.columns?.length || 0;
       if (row < 0 || col < 0 || !cols) return false;
@@ -10390,7 +10569,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
 	      const cols = win.layout.columns.length;
 	      const rows = win.layout.rows.length;
-	      const singleCellShapeData = rows === 1 && cols === 1 ? windowShapeDataForThreeCell(win, width, height) : null;
+	      const windowShapeClip = isRectangularWindowShape(win) ? null : windowShapePoints3d(win, innerW, innerH);
 	      for (let r = 0; r < rows; r += 1) {
 	        for (let c = 0; c < cols; c += 1) {
           const left = colEdges[c];
@@ -10398,15 +10577,31 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           const bottom = rowEdges[rows - r - 1];
           const top = rowEdges[rows - r];
           const cell = win.layout.cells[cellIndex(r, c, cols)];
-          addThreeCell(frameMount, cell, {
+          const cellRect = {
             x: (left + right) / 2,
             y: (bottom + top) / 2,
             w: Math.max(0.02, right - left - face * 0.03),
-            h: Math.max(0.02, top - bottom - face * 0.03),
+            h: Math.max(0.02, top - bottom - face * 0.03)
+          };
+          const cellBox = {
+            row: r,
+            col: c,
+            left: cellRect.x - cellRect.w / 2,
+            right: cellRect.x + cellRect.w / 2,
+            bottom: cellRect.y - cellRect.h / 2,
+            top: cellRect.y + cellRect.h / 2
+          };
+          const clipped = windowShapeClipForThreeCell(win, windowShapeClip, cellBox);
+          if (!clipped.visible) continue;
+          addThreeCell(frameMount, cell, {
+            x: cellRect.x,
+            y: cellRect.y,
+            w: cellRect.w,
+            h: cellRect.h,
             modelScale: scale,
 	            face,
 	            depth,
-	            shapeData: singleCellShapeData,
+	            shapeData: clipped.shapeData,
 	            cornerMount: cornerMount && cell?.type === "corner_slide" ? cornerMount : null
 	          }, mats, { row: r, col: c, rows, cols, windowId: win.windowId, windowMark: win.mark });
         }
@@ -10520,12 +10715,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function addThreeGridFrameMembers(parent, win, colEdges, rowEdges, innerW, innerH, face, depth, mats) {
       const cols = win.layout.columns.length;
       const rows = win.layout.rows.length;
+      const memberZ = 0;
       for (let col = 1; col < colEdges.length - 1; col += 1) {
         for (let row = 0; row < rows; row += 1) {
           if (cellHasCustomShape(win, row, col - 1) || cellHasCustomShape(win, row, col)) continue;
           const bottom = rowEdges[rows - row - 1];
           const top = rowEdges[rows - row];
-          addBox(parent, colEdges[col], (bottom + top) / 2, 0.01, face * 0.82, top - bottom, depth * 0.92, mats.profile);
+          addBox(parent, colEdges[col], (bottom + top) / 2, memberZ, face * 0.82, top - bottom, depth * 0.92, mats.profile);
         }
       }
       for (let edge = 1; edge < rowEdges.length - 1; edge += 1) {
@@ -10533,7 +10729,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const belowRow = rows - edge;
         for (let col = 0; col < cols; col += 1) {
           if (cellHasCustomShape(win, aboveRow, col) || cellHasCustomShape(win, belowRow, col)) continue;
-          addBox(parent, (colEdges[col] + colEdges[col + 1]) / 2, rowEdges[edge], 0.01, colEdges[col + 1] - colEdges[col], face * 0.82, depth * 0.92, mats.profile);
+          addBox(parent, (colEdges[col] + colEdges[col + 1]) / 2, rowEdges[edge], memberZ, colEdges[col + 1] - colEdges[col], face * 0.82, depth * 0.92, mats.profile);
         }
       }
     }
@@ -10557,6 +10753,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function addThreeTopologyMembers(parent, win, colEdges, rowEdges, face, depth, mats) {
       const columns = win.layout.columns.length;
       const rows = win.layout.rows.length;
+      const memberZ = 0;
+      const innerW = Math.max(0.001, colEdges[colEdges.length - 1] - colEdges[0]);
+      const innerH = Math.max(0.001, rowEdges[rowEdges.length - 1] - rowEdges[0]);
+      const windowShapePoints = isRectangularWindowShape(win) ? null : windowShapePoints3d(win, innerW, innerH);
       for (const member of win.topology?.members || []) {
         const host = findMemberHost(win.layout, member);
         if (!host) continue;
@@ -10566,16 +10766,26 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const top = rowEdges[rows - host.row];
         const cellWidth = right - left;
         const cellHeight = top - bottom;
+        const shapePoints = threeCellShapeWorldPoints(win, host, left, right, bottom, top, windowShapePoints);
+        const connectorGap = shapePoints ? Math.max(0.0015, face * 0.018) : 0;
         if (member.orientation === "horizontal") {
-          const startX = left + cellWidth * member.span.startRatio;
-          const endX = left + cellWidth * member.span.endRatio;
           const y = top - cellHeight * member.positionRatio;
-          addBox(parent, (startX + endX) / 2, y, 0.012, endX - startX, face * 0.82, depth * 0.92, mats.profile);
+          const range = threePolygonLineRange(shapePoints, "horizontal", y);
+          const chordStart = range ? range.start : left;
+          const chordEnd = range ? range.end : right;
+          const chordLength = Math.max(0, chordEnd - chordStart);
+          const startX = chordStart + chordLength * member.span.startRatio + Math.min(connectorGap, chordLength * 0.08);
+          const endX = chordStart + chordLength * member.span.endRatio - Math.min(connectorGap, chordLength * 0.08);
+          if (endX > startX) addBox(parent, (startX + endX) / 2, y, memberZ, endX - startX, face * 0.82, depth * 0.92, mats.profile);
         } else {
-          const startY = top - cellHeight * member.span.startRatio;
-          const endY = top - cellHeight * member.span.endRatio;
           const x = left + cellWidth * member.positionRatio;
-          addBox(parent, x, (startY + endY) / 2, 0.012, face * 0.82, startY - endY, depth * 0.92, mats.profile);
+          const range = threePolygonLineRange(shapePoints, "vertical", x);
+          const chordTop = range ? range.end : top;
+          const chordBottom = range ? range.start : bottom;
+          const chordLength = Math.max(0, chordTop - chordBottom);
+          const startY = chordTop - chordLength * member.span.startRatio - Math.min(connectorGap, chordLength * 0.08);
+          const endY = chordTop - chordLength * member.span.endRatio + Math.min(connectorGap, chordLength * 0.08);
+          if (startY > endY) addBox(parent, x, (startY + endY) / 2, memberZ, face * 0.82, startY - endY, depth * 0.92, mats.profile);
         }
       }
     }
@@ -10903,9 +11113,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function threeOpeningSashBounds(pocket, rect, options = {}) {
       const shaped = Boolean(options.shaped);
       const clearance = Math.max(
-        0.003,
-        rect.face * (shaped ? 0.055 : 0.065),
-        pocket.face * (shaped ? 0.12 : 0.16)
+        shaped ? 0.0008 : 0.003,
+        rect.face * (shaped ? 0.006 : 0.065),
+        pocket.face * (shaped ? 0.012 : 0.16)
       );
       return {
         x: pocket.x,
@@ -10972,7 +11182,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function threeOperablePocket(rect, options = {}) {
       const embeddedShape = Boolean(options.embeddedShape);
       const inset = embeddedShape
-        ? Math.max(rect.face * 0.08, rect.depth * 0.05)
+        ? Math.max(rect.face * 0.006, rect.depth * 0.004)
         : Math.max(rect.face * 0.22, rect.depth * 0.12);
       const width = Math.max(0.04, rect.w - inset * 2);
       const height = Math.max(0.04, rect.h - inset * 2);
@@ -10983,7 +11193,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         w: width,
         h: height,
         inset,
-        face: Math.max(rect.face * 0.28, Math.min(width, height) * 0.032),
+        face: Math.max(rect.face * (embeddedShape ? 0.42 : 0.28), Math.min(width, height) * 0.032),
         depth: Math.max(0.028, rect.depth * 0.42)
       };
     }
@@ -11230,9 +11440,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 	    function threeCellShapeData(cell, rect) {
 	      const cellShape = normalizeCellCustomShape(cell?.customShape);
 	      if (cellShape) return cellShape;
-	      const rectShape = normalizeCellCustomShape(rect?.shapeData);
-	      return rectShape ? {
-	        ...rectShape,
+	      const rectPoints = normalizeShapePoints(rect?.shapeData?.points);
+	      return rectPoints.length >= 3 ? {
+	        shapeId: String(rect?.shapeData?.shapeId || ""),
+	        name: String(rect?.shapeData?.name || "异形构件"),
+	        points: rectPoints,
 	        frameShape: Boolean(rect?.shapeData?.frameShape),
 	        shapeType: String(rect?.shapeData?.shapeType || ""),
 	        angleDeg: Number(rect?.shapeData?.angleDeg || 0)
@@ -11371,7 +11583,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       glass.position.z = 0.01;
       glass.userData.mountType = "diy-cell-glass";
       parent.add(glass);
-      const edgeRadius = Math.max(0.008, face * 0.32);
+      const edgeRadius = Math.max(0.008, shapeData.frameShape ? face : face * 0.32);
       for (let index = 0; index < points.length; index += 1) {
         const start = points[index];
         const end = points[(index + 1) % points.length];

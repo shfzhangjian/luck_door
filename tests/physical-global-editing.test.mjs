@@ -146,8 +146,9 @@ assert.ok(
   app.includes("function threeSashClosedCenterZ(rect, pocket, hingeZ)") &&
   app.includes("function threeSashHardwareZ(rect, pocket, hingeZ)") &&
   app.includes("function threeOpeningSashBounds(pocket, rect, options = {})") &&
-  app.includes("rect.face * (shaped ? 0.055 : 0.065)") &&
-  app.includes("pocket.face * (shaped ? 0.12 : 0.16)") &&
+  app.includes("shaped ? 0.0008 : 0.003") &&
+  app.includes("rect.face * (shaped ? 0.006 : 0.065)") &&
+  app.includes("pocket.face * (shaped ? 0.012 : 0.16)") &&
   app.includes("pocket.w - clearance * 2") &&
   app.includes("pocket.h - clearance * 2") &&
   app.includes("function threeShapedSashGeometry(shapeData, pocket, rect)") &&
@@ -185,7 +186,8 @@ assert.ok(
 );
 assert.ok(
   app.includes("function windowShapeDataForThreeCell") &&
-  app.includes("shapeData: singleCellShapeData") &&
+  app.includes("function windowShapeClipForThreeCell") &&
+  app.includes("shapeData: clipped.shapeData") &&
   app.includes("function threeCellShapeData(cell, rect)") &&
   app.includes("addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly)") &&
   app.includes("frameShape: true") &&
