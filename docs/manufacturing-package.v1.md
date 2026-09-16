@@ -1,6 +1,6 @@
 # Manufacturing Package v1
 
-朗科门窗设计大师第一阶段对外输出 `door-mes-manufacturing-package.v1`。
+门窗云设计第一阶段对外输出 `door-mes-manufacturing-package.v1`。
 
 该接口包不是完整 MES 数据库，而是设计平台向后续系统交付的稳定数据边界。
 

@@ -2352,6 +2352,10 @@
       stroke-linecap: round;
     }
 
+    .screen-mesh-line {
+      vector-effect: non-scaling-stroke;
+    }
+
     .panel-mode-label {
       pointer-events: none;
       font-size: 12px;

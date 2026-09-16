@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://doormes.local/schemas/door-window-design.v1.schema.json",
-  "title": "朗科门窗设计大师设计JSON",
+  "title": "门窗云设计设计JSON",
   "description": "中国门窗可视化设计平台第一阶段设计数据格式。该格式是绘图、算料、BOM和外部接口的统一输入。",
   "type": "object",
   "required": ["schemaVersion", "project", "order", "catalog", "windows"],

@@ -44,6 +44,20 @@ assert.ok(
   "Lock hardware must be placeable in a cell and rendered in both 2D and 3D."
 );
 assert.ok(
+  app.includes("function threeMarkupPositionFrom2dPercent") &&
+  app.includes("function lockMarkupPointOnSashFrame") &&
+  app.includes('markup.kind === "lock"') &&
+  app.includes("lockMarkupPointOnSashFrame(cell, item, scale, markup)") &&
+  app.includes('options.hingeAxis === "side"') &&
+  app.includes('options.hingeAxis === "horizontal"') &&
+  app.includes('x: leftHinged ? panelWidth : -panelWidth') &&
+  app.includes('y: topHinged ? -panelHeight : panelHeight') &&
+  app.includes("function cellHasHostedLockMarkup") &&
+  app.includes("if (!cellHasHostedLockMarkup(cell)) addHandle") &&
+  app.includes("const handleDirection = threeLockHandleDirection(options.mountCell || cell)"),
+  "Lock hardware must snap to the sash/frame edge in both 2D and 3D and suppress duplicate generic handles."
+);
+assert.ok(
   app.includes("function defaultLockPositionForCell") &&
   app.includes("function ensureDefaultLockMarkup") &&
   app.includes("note: DEFAULT_LOCK_NOTE") &&
@@ -123,8 +137,8 @@ assert.ok(
   "3D dimensions, hosted objects, and indoor/outdoor labels must have visibility controls."
 );
 assert.ok(
-  app.includes("function threeOperablePocket(rect)") &&
-  app.includes("function addThreeFrameRebate(parent, rect, mats)") &&
+  app.includes("function threeOperablePocket(rect, options = {})") &&
+  app.includes("function addThreeFrameRebate(parent, rect, mats, options = {})") &&
   app.includes('userData.mountType = "frame-rebate-stop"') &&
   app.includes("hingeRoot.position.set(hingeX, pocket.y, pocket.z)") &&
   app.includes("hingeRoot.position.set(pocket.x, hingeY, pocket.z)") &&
@@ -134,6 +148,41 @@ assert.ok(
   app.includes('addFixedVerticalHingePlates') &&
   app.includes("function ensurePreviewPartSelection()"),
   "3D sash geometry must sit in a frame rebate pocket, stay selected by default, and rotate from a frame-mounted hinge mechanism."
+);
+assert.ok(
+  app.includes("function primaryOpenableForCell") &&
+  app.includes("function attachScreenToOpenable") &&
+  app.includes('userData.mountType = "integrated-screen-follows-sash"') &&
+  app.includes("if (host && attachScreenToOpenable(screen, host, rect)) return;"),
+  "Integrated screens must attach to the host sash in 3D so screen opening follows the window opening."
+);
+assert.ok(
+  app.includes("function windowShapeDataForThreeCell") &&
+  app.includes("shapeData: singleCellShapeData") &&
+  app.includes("function threeCellShapeData(cell, rect)") &&
+  app.includes("addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly)") &&
+  app.includes("frameShape: true") &&
+  app.includes("tightShape: shapeData.frameShape") &&
+  app.includes("suppressRectStops: shapeData.frameShape") &&
+  app.includes("function addThreeShapeRebateStops") &&
+  app.includes('userData.mountType = "shape-frame-rebate-stop"') &&
+  app.includes("function addThreeShapeAnnotations") &&
+  app.includes("addThreeShapeAnnotations(model, win, width, height, depth)") &&
+  app.includes('userData.mountType = "three-shape-angle-label"') &&
+  app.includes('{ boxed: false }') &&
+  app.includes("integrated-screen-follows-open-sash") &&
+  app.includes("function hungSashGeometry"),
+  "2D and 3D operable sashes must inherit frame/custom shape geometry instead of falling back to rectangular panels."
+);
+assert.ok(
+  app.includes("function normalizeMarkupRotation") &&
+  app.includes("function parseMarkupTextRotation") &&
+  app.includes("rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg)") &&
+  app.includes('class="cell-markup-text-rotor"') &&
+  app.includes('transform="rotate(${rotation} ${cx} ${cy})"') &&
+  app.includes("label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180") &&
+  app.includes('["旋转", `${normalizeMarkupRotation(markup.markup.rotationDeg)}°`]'),
+  "2D and 3D text markups must persist and render arbitrary rotation."
 );
 assert.ok(css.includes(".geometry-drag-handle") && css.includes(".internal-joint-zone"), "Canvas geometry and internal-joint hit targets must be styled and discoverable.");
 assert.ok(
@@ -267,7 +316,8 @@ assert.ok(
   app.includes("slidingSashElevation(cell, item, outlineColor, frameColor, scale, true)") &&
   app.includes("hungSashElevation(cell, item, outlineColor, frameColor, scale, true)") &&
   app.includes("const geometry = sideHungSashGeometry(cell, item, scale)") &&
-  app.includes("const projected = projectMarkupPointForOpenSash(cell, item, scale, markup)") &&
+  app.includes("const openSidePoint = projectMarkupPointForOpenSash(cell, item, scale, markup)") &&
+  app.includes("const projected = markup.kind === \"lock\"") &&
   app.includes("const reveal = Math.max(1.5, Math.min(5") &&
   app.includes("function pointOnSegment(start, end, ratio)") &&
   app.includes("const openAngle = openRatio * 78 * Math.PI / 180") &&
@@ -285,9 +335,14 @@ assert.ok(
   app.includes("function openSashInnerPolygon(outer, face)") &&
   app.includes("const outer = metrics.shapedPoints?.length") &&
   app.includes("metrics.shapedPoints.map(projectClosedPoint)") &&
-  app.includes("const freeTopPoint = leftHinged ? rightTop : leftTop") &&
+  app.includes("function polygonSideEdgeByX(points, preferMax = true)") &&
+  app.includes("function sideHungSymbolForPolygon(cell, points, leftHinged, labelY)") &&
+  app.includes("const shapedFreeEdge = shapedSash ? polygonSideEdgeByX(outer, leftHinged) : null") &&
+  app.includes("const freeTopPoint = shapedFreeEdge?.topPoint || (leftHinged ? rightTop : leftTop)") &&
   app.includes("const symbolTopPoint = pointToward(hingePoint, freeTopPoint, symbolInset)") &&
   app.includes("cellOpeningRatio(entry.part.cell)") &&
+  app.includes("function overheadPlanProjection(part, ratio)") &&
+  app.includes("function renderPlanOverheadProjection(part, ratio, planY)") &&
   html.includes('id="assemblyOpenPercent"') &&
   html.includes('id="assemblyOpenPlane"') &&
   app.includes("renderSashProfilePolygon(outer, sashFace, frameColor, outlineColor)") &&

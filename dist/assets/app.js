@@ -87,6 +87,8 @@ const LEGACY_FILL_CELL_TYPES = Object.freeze(["screen", "louver", "grille", "pan
 const INFILL_TYPES = Object.freeze(["glass", "panel", "louver"]);
 const PANEL_MODES = Object.freeze(["single", "double"]);
 const CELL_SCREEN_MODES = Object.freeze(["none", "fixed", "swing", "sliding", "retractable"]);
+const SCREEN_MESH_COLUMNS = 12;
+const SCREEN_MESH_ROWS = 14;
 const PROJECT_STATUS_OPTIONS = Object.freeze([
   ["new", "新建项目"],
   ["designing", "设计方案"],
@@ -185,7 +187,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         schemaVersion: "cn-door-window-design.v2",
         project: {
           projectId: "P-2026-001",
-          name: "中国门窗设计样板工程",
+          name: "门窗云设计样板工程",
           customerName: "样板客户",
           contactPhone: "168",
           status: "designing",
@@ -451,6 +453,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return `MK-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
     }
 
+    function normalizeMarkupRotation(value, fallback = 0) {
+      const number = Number(value);
+      const source = Number.isFinite(number) ? number : Number(fallback || 0);
+      return Math.round((Number.isFinite(source) ? source : 0) * 10) / 10;
+    }
+
+    function parseMarkupTextRotation(value, fallbackRotation = 0) {
+      const source = String(value || "").trim();
+      if (!source) return { text: "文字标注", rotationDeg: normalizeMarkupRotation(fallbackRotation) };
+      const parts = source.split(/[，,|｜]/);
+      const last = parts.length > 1 ? parts[parts.length - 1].trim() : "";
+      const maybeAngle = Number(last.replace(/°$/u, ""));
+      if (parts.length > 1 && Number.isFinite(maybeAngle)) {
+        return {
+          text: parts.slice(0, -1).join(",").trim() || "文字标注",
+          rotationDeg: normalizeMarkupRotation(maybeAngle, fallbackRotation)
+        };
+      }
+      return { text: source, rotationDeg: normalizeMarkupRotation(fallbackRotation) };
+    }
+
     function normalizeCellMarkup(value = {}) {
       const kind = ["text", "circle_hole", "square_hole", "lock"].includes(value.kind) ? value.kind : "text";
       const xPercent = Math.max(0, Math.min(100, Number(value.xPercent ?? value.xRatio ?? 50)));
@@ -464,6 +487,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         offsetXPercent: Math.max(-100, Math.min(100, Number(value.offsetXPercent ?? xPercent - 50))),
         offsetYPercent: Math.max(-100, Math.min(100, Number(value.offsetYPercent ?? yPercent - 50))),
         sizeMm: Math.max(10, Math.min(300, Number(value.sizeMm || (kind === "text" ? 0 : 60)))),
+        rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg),
         hostType: "cell",
         hostWindowId: String(value.hostWindowId || ""),
         hostCellId: String(value.hostCellId || ""),
@@ -488,6 +512,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         offsetXPercent: Math.max(-200, Math.min(200, Number(value.offsetXPercent ?? xPercent - 50))),
         offsetYPercent: Math.max(-200, Math.min(200, Number(value.offsetYPercent ?? yPercent - 50))),
         sizeMm: 0,
+        rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg),
         hostType: "window",
         hostWindowId: String(value.hostWindowId || ""),
         hostCellId: "",
@@ -650,7 +675,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       next.schemaVersion = "cn-door-window-design.v2";
       next.project ||= {};
       next.project.projectId ||= "P-2026-001";
-      next.project.name ||= "中国门窗设计样板工程";
+      next.project.name ||= "门窗云设计样板工程";
       next.project.customerName ||= "";
       next.project.contactPhone ||= "";
       next.project.status = ["new", "designing", "review", "confirmed"].includes(next.project.status) ? next.project.status : "designing";
@@ -5135,12 +5160,67 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       };
     }
 
+    function markupPercent(markup, key, fallback = 50) {
+      const value = Number(markup?.[key]);
+      return Math.max(0, Math.min(100, Number.isFinite(value) ? value : fallback));
+    }
+
+    function lockMarkupPointOnSashFrame(cell, item, scale, markup) {
+      const openSidePoint = projectMarkupPointForOpenSash(cell, item, scale, markup);
+      if (openSidePoint) return openSidePoint;
+      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
+      const xPercent = markupPercent(markup, "xPercent");
+      const yPercent = markupPercent(markup, "yPercent");
+      const alongX = left + width * xPercent / 100;
+      const alongY = top + height * yPercent / 100;
+      const edgeInset = Math.max(2, sashFace * 0.56);
+      const opening = String(cell?.opening || "");
+      if (["turn", "turn_tilt", "door"].includes(cell?.type)) {
+        const leftHinged = opening.startsWith("left");
+        return {
+          x: leftHinged ? left + width - edgeInset : left + edgeInset,
+          y: alongY
+        };
+      }
+      if (cell?.type === "top_hung" || cell?.type === "bottom_hung") {
+        if (project.viewOptions?.showOpenState) {
+          const openRatio = cellOpeningRatio(cell);
+          const topHinged = cell.type === "top_hung";
+          const freeY = topHinged
+            ? top + height * (1 - 0.44 * openRatio)
+            : top + height * 0.44 * openRatio;
+          return {
+            x: alongX,
+            y: topHinged ? freeY - edgeInset : freeY + edgeInset
+          };
+        }
+        return {
+          x: alongX,
+          y: cell.type === "top_hung" ? top + height - edgeInset : top + edgeInset
+        };
+      }
+      if (cell?.type === "vertical_slide") {
+        return {
+          x: alongX,
+          y: yPercent >= 50 ? top + height - edgeInset : top + edgeInset
+        };
+      }
+      return {
+        x: xPercent >= 50 ? left + width - edgeInset : left + edgeInset,
+        y: alongY
+      };
+    }
+
     function renderTextMarkup(markup, cx, cy, common) {
       const text = escapeHtml(markup.text || "文字标注");
       const width = Math.max(64, text.length * 11 + 20);
+      const rotation = normalizeMarkupRotation(markup.rotationDeg);
+      const transform = rotation ? ` transform="rotate(${rotation} ${cx} ${cy})"` : "";
       return `<g ${common} aria-label="文字标注，双击编辑，拖动调整位置">
-        <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - 14}" width="${width}" height="28" rx="2" />
-        <text class="cell-markup-text" x="${cx}" y="${cy + 4}">${text}</text>
+        <g class="cell-markup-text-rotor"${transform}>
+          <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - 14}" width="${width}" height="28" rx="2" />
+          <text class="cell-markup-text" x="${cx}" y="${cy + 4}">${text}</text>
+        </g>
       </g>`;
     }
 
@@ -5160,7 +5240,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const markups = normalizeCellMarkups(cell?.markups);
       if (!markups.length) return "";
       return markups.map(markup => {
-        const projected = projectMarkupPointForOpenSash(cell, item, scale, markup);
+        const projected = markup.kind === "lock"
+          ? lockMarkupPointOnSashFrame(cell, item, scale, markup)
+          : projectMarkupPointForOpenSash(cell, item, scale, markup);
         const cx = projected?.x ?? item.x + item.w * markup.xPercent / 100;
         const cy = projected?.y ?? item.y + item.h * markup.yPercent / 100;
         const common = `class="cell-markup ${markup.kind} ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-markup-host="cell" data-window-id="${escapeHtml(item.windowId || "")}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0" role="button"`;
@@ -5242,7 +5324,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           }
         }
         parts.push(cellDecoration(cell, item, outlineColor));
-        parts.push(integratedScreenDecoration(cell, item, outlineColor));
+	        parts.push(integratedScreenDecoration(cell, item, outlineColor, scale));
         parts.push(`<text class="cell-label" x="${item.x + item.w / 2}" y="${item.y + item.h / 2}">${escapeHtml(cellDrawingCode(cell.type, item.row * win.layout.columns.length + item.col))}</text>`);
         if (selected) {
           parts.push(`<rect class="selected-stroke" x="${item.x + 3}" y="${item.y + 3}" width="${Math.max(0, item.w - 6)}" height="${Math.max(0, item.h - 6)}" />`);
@@ -5412,8 +5494,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             parts.push(closedCellElevation(cell, renderItem, outlineColor, frameColor, scale));
           }
         }
-        parts.push(cellDecoration(cell, item, outlineColor));
-        parts.push(integratedScreenDecoration(cell, item, outlineColor));
+	        parts.push(cellDecoration(cell, item, outlineColor));
+	        const screenDecoration = integratedScreenDecoration(cell, renderItem, outlineColor, scale);
+	        if (options.showOpenState && openable && renderOpenCellAboveFrame(cell) && screenDecoration.includes("integrated-screen-follows-open-sash")) {
+	          foregroundOpenCells.push(screenDecoration);
+	        } else {
+	          parts.push(screenDecoration);
+	        }
         if (useCellClip) parts.push(`</g>`);
         parts.push(`<text class="cell-label" x="${item.x + item.w / 2}" y="${item.y + item.h / 2}">${escapeHtml(cellDrawingCode(cell.type, i))}</text>`);
         if (selected && openable && options.showDimensions) {
@@ -6242,9 +6329,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       activeMarkupEditor = { markupId };
       input.type = "text";
       input.value = found.markup.kind === "text"
-        ? found.markup.text
-        : `${Math.round(found.markup.sizeMm)},${Math.round(found.markup.xPercent)},${Math.round(found.markup.yPercent)}`;
-      input.placeholder = found.markup.kind === "text" ? "输入标注文字" : "尺寸mm,X%,Y%";
+        ? `${found.markup.text || "文字标注"},${normalizeMarkupRotation(found.markup.rotationDeg)}`
+        : `${Math.round(found.markup.sizeMm)},${Math.round(found.markup.xPercent)},${Math.round(found.markup.yPercent)},${normalizeMarkupRotation(found.markup.rotationDeg)}`;
+      input.placeholder = found.markup.kind === "text" ? "文字,角度°" : "尺寸mm,X%,Y%,角度°";
       const bounds = shell.getBoundingClientRect();
       const left = Number.isFinite(event.clientX) ? event.clientX - bounds.left : bounds.width / 2;
       const top = Number.isFinite(event.clientY) ? event.clientY - bounds.top : bounds.height / 2;
@@ -6270,12 +6357,15 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         return;
       }
       if (found.markup.kind === "text") {
-        found.markup.text = input.value.trim() || "文字标注";
+        const parsed = parseMarkupTextRotation(input.value, found.markup.rotationDeg);
+        found.markup.text = parsed.text;
+        found.markup.rotationDeg = parsed.rotationDeg;
       } else {
-        const [size, xPercent, yPercent] = input.value.split(/[,\s]+/).map(Number);
+        const [size, xPercent, yPercent, rotationDeg] = input.value.split(/[,\s]+/).map(Number);
         if (Number.isFinite(size)) found.markup.sizeMm = Math.max(10, Math.min(300, size));
         if (Number.isFinite(xPercent)) found.markup.xPercent = Math.max(4, Math.min(96, xPercent));
         if (Number.isFinite(yPercent)) found.markup.yPercent = Math.max(4, Math.min(96, yPercent));
+        if (Number.isFinite(rotationDeg)) found.markup.rotationDeg = normalizeMarkupRotation(rotationDeg, found.markup.rotationDeg);
         found.markup.offsetXPercent = found.markup.xPercent - 50;
         found.markup.offsetYPercent = found.markup.yPercent - 50;
       }
@@ -7711,7 +7801,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return { left, top, width, height, sashFace, shapedPoints };
     }
 
-    function sideHungSashGeometry(cell, item, scale) {
+	    function sideHungSashGeometry(cell, item, scale) {
       const metrics = sashRenderMetrics(item, scale);
       const { left, top, width, height, sashFace } = metrics;
       const assembly = normalizeOpeningAssembly(cell?.type, cell?.opening, cell?.openingAssembly);
@@ -7778,29 +7868,89 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         leftBottom,
         rightBottom,
         outer
-      };
-    }
+	      };
+	    }
 
-    function closedSashElevation(cell, item, outlineColor, frameColor, scale) {
-      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
-      const hasHostedLock = normalizeCellMarkups(cell.markups).some(markup => markup.kind === "lock");
-      const leftHinged = cell.opening?.startsWith("left");
-      const handleX = ["top_hung", "bottom_hung"].includes(cell.type)
-        ? left + width / 2
-        : (leftHinged ? left + width - sashFace * 0.62 : left + sashFace * 0.62);
-      const handleY = handlePositionY(cell, item, scale);
-      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
-      const symbolItem = { x: left, y: top, w: width, h: height };
-      const symbolInset = Math.max(4, sashFace * 0.78);
-      return `
-        <g class="closed-sash-elevation">
-          <rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />
-          ${renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor)}
-          ${openingSymbol(cell, symbolItem, symbolInset)}
-          ${hasHostedLock ? "" : `<line class="sash-profile-handle" x1="${handleX}" y1="${handleY - 9}" x2="${handleX}" y2="${handleY + 9}" />`}
-        </g>
-      `;
-    }
+	    function projectPointToQuad(point, bounds, leftTop, rightTop, rightBottom, leftBottom) {
+	      const width = Math.max(1, bounds.width || bounds.w || 1);
+	      const height = Math.max(1, bounds.height || bounds.h || 1);
+	      const u = Math.max(0, Math.min(1, (point[0] - bounds.left) / width));
+	      const v = Math.max(0, Math.min(1, (point[1] - bounds.top) / height));
+	      const topX = leftTop[0] + (rightTop[0] - leftTop[0]) * u;
+	      const topY = leftTop[1] + (rightTop[1] - leftTop[1]) * u;
+	      const bottomX = leftBottom[0] + (rightBottom[0] - leftBottom[0]) * u;
+	      const bottomY = leftBottom[1] + (rightBottom[1] - leftBottom[1]) * u;
+	      return [topX + (bottomX - topX) * v, topY + (bottomY - topY) * v];
+	    }
+
+	    function projectShapeToQuad(points, metrics, leftTop, rightTop, rightBottom, leftBottom) {
+	      if (!Array.isArray(points) || points.length < 3) return [];
+	      return points.map(point => projectPointToQuad(point, {
+	        left: metrics.left,
+	        top: metrics.top,
+	        width: metrics.width,
+	        height: metrics.height
+	      }, leftTop, rightTop, rightBottom, leftBottom));
+	    }
+
+	    function polygonSideEdgeByX(points, preferMax = true) {
+	      if (!Array.isArray(points) || points.length < 2) return null;
+	      let best = null;
+	      points.forEach((start, index) => {
+	        const end = points[(index + 1) % points.length];
+	        const score = (start[0] + end[0]) / 2;
+	        const spanY = Math.abs(end[1] - start[1]);
+	        if (!best || (preferMax ? score > best.score : score < best.score) || (Math.abs(score - best.score) < 0.001 && spanY > best.spanY)) {
+	          best = { start, end, score, spanY };
+	        }
+	      });
+	      if (!best) return null;
+	      const [topPoint, bottomPoint] = best.start[1] <= best.end[1]
+	        ? [best.start, best.end]
+	        : [best.end, best.start];
+	      return { topPoint, bottomPoint, center: [(topPoint[0] + bottomPoint[0]) / 2, (topPoint[1] + bottomPoint[1]) / 2] };
+	    }
+
+	    function sideHungSymbolForPolygon(cell, points, leftHinged, labelY) {
+	      const freeEdge = polygonSideEdgeByX(points, leftHinged);
+	      const hingeEdge = polygonSideEdgeByX(points, !leftHinged);
+	      if (!freeEdge || !hingeEdge) return "";
+	      const labelX = (hingeEdge.center[0] + freeEdge.center[0]) / 2;
+	      const topY = Math.min(...points.map(point => point[1]));
+	      return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, labelX, labelY ?? topY + 14)}<path d="M${hingeEdge.center[0]} ${hingeEdge.center[1]} L${freeEdge.topPoint[0]} ${freeEdge.topPoint[1]} M${hingeEdge.center[0]} ${hingeEdge.center[1]} L${freeEdge.bottomPoint[0]} ${freeEdge.bottomPoint[1]}" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
+	    }
+
+	    function closedSashElevation(cell, item, outlineColor, frameColor, scale) {
+	      const metrics = sashRenderMetrics(item, scale);
+	      const { left, top, width, height, sashFace, shapedPoints } = metrics;
+	      const hasHostedLock = normalizeCellMarkups(cell.markups).some(markup => markup.kind === "lock");
+	      const leftHinged = cell.opening?.startsWith("left");
+	      const handleX = ["top_hung", "bottom_hung"].includes(cell.type)
+	        ? left + width / 2
+	        : (leftHinged ? left + width - sashFace * 0.62 : left + sashFace * 0.62);
+	      const handleY = handlePositionY(cell, item, scale);
+	      const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
+	      const symbolItem = { x: left, y: top, w: width, h: height };
+	      const symbolInset = Math.max(4, sashFace * 0.78);
+	      const shapedSash = Array.isArray(shapedPoints) && shapedPoints.length >= 3;
+	      const glass = shapedSash
+	        ? `<polygon class="sash-profile-glass" points="${insetPolygonTowardCentroid(shapedPoints, Math.max(4, sashFace * 0.82)).map(point => point.join(",")).join(" ")}" fill="${glassFill}" />`
+	        : `<rect class="sash-profile-glass" x="${left + sashFace}" y="${top + sashFace}" width="${Math.max(0, width - sashFace * 2)}" height="${Math.max(0, height - sashFace * 2)}" fill="${glassFill}" />`;
+	      const profile = shapedSash
+	        ? renderSashProfilePolygon(shapedPoints, sashFace, frameColor, outlineColor)
+	        : renderSashProfileRect(left, top, width, height, sashFace, frameColor, outlineColor);
+	      const symbol = shapedSash && ["turn", "turn_tilt", "door"].includes(cell.type)
+	        ? sideHungSymbolForPolygon(cell, shapedPoints, leftHinged, top + 18)
+	        : openingSymbol(cell, symbolItem, symbolInset);
+	      return `
+	        <g class="closed-sash-elevation">
+	          ${glass}
+	          ${profile}
+	          ${symbol}
+	          ${hasHostedLock ? "" : `<line class="sash-profile-handle" x1="${handleX}" y1="${handleY - 9}" x2="${handleX}" y2="${handleY + 9}" />`}
+	        </g>
+	      `;
+	    }
 
     function closedSymbolicElevation(cell, item, outlineColor, frameColor, scale) {
       const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
@@ -7844,8 +7994,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         : openSashInnerPolygon(outer, sashFace);
       const symbolInset = Math.max(3, sashFace * 0.35);
       const hingePoint = [hingeX, hingeCenterY];
-      const freeTopPoint = leftHinged ? rightTop : leftTop;
-      const freeBottomPoint = leftHinged ? rightBottom : leftBottom;
+	      const shapedFreeEdge = shapedSash ? polygonSideEdgeByX(outer, leftHinged) : null;
+	      const freeTopPoint = shapedFreeEdge?.topPoint || (leftHinged ? rightTop : leftTop);
+	      const freeBottomPoint = shapedFreeEdge?.bottomPoint || (leftHinged ? rightBottom : leftBottom);
       const symbolTopPoint = pointToward(hingePoint, freeTopPoint, symbolInset);
       const symbolBottomPoint = pointToward(hingePoint, freeBottomPoint, symbolInset);
       const handleRatio = Math.max(0.08, Math.min(0.92, (handlePositionY(cell, item, scale) - top) / Math.max(1, height)));
@@ -7984,41 +8135,94 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }).join("");
     }
 
-    function integratedScreenDecoration(cell, item, stroke) {
-      const mode = cell.openingAssembly?.screenMode && cell.openingAssembly.screenMode !== "none"
-        ? cell.openingAssembly.screenMode
-        : normalizeCellAccessories(cell.accessories).screenMode;
-      if (!mode || mode === "none") return "";
-      const inset = Math.max(8, Math.min(item.w, item.h) * 0.08);
-      const left = item.x + inset;
-      const right = item.x + item.w - inset;
-      const top = item.y + inset;
-      const bottom = item.y + item.h - inset;
+	    function screenClipId(cell, item, suffix = "") {
+	      return `screenClip-${String(item.windowId || "w").replace(/[^a-zA-Z0-9_-]/g, "_")}-${item.row ?? 0}-${item.col ?? 0}-${String(cell.cellId || "").replace(/[^a-zA-Z0-9_-]/g, "_")}${suffix}`;
+	    }
+
+	    function screenMeshSvg(left, right, top, bottom) {
+	      const lines = [];
+	      for (let index = 1; index < SCREEN_MESH_COLUMNS; index += 1) {
+	        const x = left + (right - left) * index / SCREEN_MESH_COLUMNS;
+	        lines.push(`<line class="screen-line screen-mesh-line" x1="${x}" y1="${top}" x2="${x}" y2="${bottom}" stroke="#2ca978" stroke-width="0.72" />`);
+	      }
+	      for (let index = 1; index < SCREEN_MESH_ROWS; index += 1) {
+	        const y = top + (bottom - top) * index / SCREEN_MESH_ROWS;
+	        lines.push(`<line class="screen-line screen-mesh-line" x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#2ca978" stroke-width="0.72" />`);
+	      }
+	      return lines.join("");
+	    }
+
+	    function integratedScreenPolygonDecoration(cell, item, mode, points) {
+	      if (!Array.isArray(points) || points.length < 3) return "";
+	      const screenPoints = insetPolygonTowardCentroid(points, Math.max(5, Math.min(item.w, item.h) * 0.045));
+	      const bounds = boundsForPoints(screenPoints);
+	      if (!bounds || bounds.w <= 0 || bounds.h <= 0) return "";
+	      const id = screenClipId(cell, item, "-open");
+	      const left = bounds.x;
+	      const right = bounds.x + bounds.w;
+	      const top = bounds.y;
+	      const bottom = bounds.y + bounds.h;
+	      const polygon = screenPoints.map(point => point.join(",")).join(" ");
+	      return `
+	        <g class="integrated-screen integrated-screen-follows-open-sash" opacity="0.62">
+	          <defs><clipPath id="${id}"><polygon points="${polygon}" /></clipPath></defs>
+	          <polygon class="screen-outline" points="${polygon}" fill="rgba(189,243,217,0.18)" stroke="#2ca978" stroke-width="1.2" />
+	          ${mode === "retractable" ? `<rect x="${left}" y="${top}" width="${Math.min(10, Math.max(3, bounds.w * 0.06))}" height="${bottom - top}" fill="#8aa7a2" clip-path="url(#${id})" />` : ""}
+	          <g clip-path="url(#${id})">${screenMeshSvg(left, right, top, bottom)}</g>
+	        </g>`;
+	    }
+
+	    function hungSashGeometry(cell, item, scale) {
+	      const metrics = sashRenderMetrics(item, scale);
+	      const { left, top, width, height } = metrics;
+	      const openRatio = cellOpeningRatio(cell);
+	      const topHinged = cell.type === "top_hung";
+	      const hingeY = topHinged ? top : top + height;
+	      const freeY = topHinged ? top + height * (1 - 0.44 * openRatio) : top + height * 0.44 * openRatio;
+	      const taper = Math.min(width * 0.1, 12);
+	      const leftTop = topHinged ? [left, hingeY] : [left + taper, freeY];
+	      const rightTop = topHinged ? [left + width, hingeY] : [left + width - taper, freeY];
+	      const rightBottom = topHinged ? [left + width - taper, freeY] : [left + width, hingeY];
+	      const leftBottom = topHinged ? [left + taper, freeY] : [left, hingeY];
+	      const outer = metrics.shapedPoints?.length
+	        ? projectShapeToQuad(metrics.shapedPoints, metrics, leftTop, rightTop, rightBottom, leftBottom)
+	        : [leftTop, rightTop, rightBottom, leftBottom];
+	      return { ...metrics, openRatio, topHinged, hingeY, freeY, taper, leftTop, rightTop, rightBottom, leftBottom, outer };
+	    }
+
+	    function integratedScreenDecoration(cell, item, stroke, scale = 1) {
+	      const mode = cell.openingAssembly?.screenMode && cell.openingAssembly.screenMode !== "none"
+	        ? cell.openingAssembly.screenMode
+	        : normalizeCellAccessories(cell.accessories).screenMode;
+	      if (!mode || mode === "none") return "";
+	      if (project.viewOptions?.showOpenState && isOperableType(cell.type) && cellOpeningRatio(cell) > 0.001) {
+	        if (["turn", "turn_tilt", "door"].includes(cell.type) && !(cell.openingAssembly?.panelCount > 1)) {
+	          return integratedScreenPolygonDecoration(cell, item, mode, sideHungSashGeometry(cell, item, scale).outer);
+	        }
+	        if (cell.type === "top_hung" || cell.type === "bottom_hung") {
+	          return integratedScreenPolygonDecoration(cell, item, mode, hungSashGeometry(cell, item, scale).outer);
+	        }
+	      }
+	      if (Array.isArray(item.shapePoints) && item.shapePoints.length >= 3) {
+	        return integratedScreenPolygonDecoration(cell, item, mode, item.shapePoints);
+	      }
+	      const inset = Math.max(8, Math.min(item.w, item.h) * 0.08);
+	      const left = item.x + inset;
+	      const right = item.x + item.w - inset;
+	      const top = item.y + inset;
+	      const bottom = item.y + item.h - inset;
       const lines = [`<g class="integrated-screen" opacity="0.58">`];
       if (mode === "retractable") {
         lines.push(`<rect x="${left}" y="${top}" width="${Math.min(10, item.w * 0.06)}" height="${bottom - top}" fill="#8aa7a2" />`);
       }
-      for (let index = 1; index < 5; index += 1) {
-        const x = left + (right - left) * index / 5;
-        const y = top + (bottom - top) * index / 5;
-        lines.push(`<line x1="${x}" y1="${top}" x2="${x}" y2="${bottom}" stroke="${stroke}" stroke-width="0.7" />`);
-        lines.push(`<line x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="${stroke}" stroke-width="0.7" />`);
-      }
-      lines.push(`</g>`);
-      return lines.join("");
-    }
+	      lines.push(screenMeshSvg(left, right, top, bottom));
+	      lines.push(`</g>`);
+	      return lines.join("");
+	    }
 
     function hungSashElevation(cell, item, outlineColor, frameColor, scale, opened = true) {
       if (!opened) return closedSashElevation(cell, item, outlineColor, frameColor, scale);
-      const { left, top, width, height, sashFace } = sashRenderMetrics(item, scale);
-      const openRatio = cellOpeningRatio(cell);
-      const topHinged = cell.type === "top_hung";
-      const hingeY = topHinged ? top : top + height;
-      const freeY = topHinged ? top + height * (1 - 0.44 * openRatio) : top + height * 0.44 * openRatio;
-      const taper = Math.min(width * 0.1, 12);
-      const outer = topHinged
-        ? [[left, hingeY], [left + width, hingeY], [left + width - taper, freeY], [left + taper, freeY]]
-        : [[left + taper, freeY], [left + width - taper, freeY], [left + width, hingeY], [left, hingeY]];
+	      const { left, top, width, height, sashFace, topHinged, hingeY, freeY, outer } = hungSashGeometry(cell, item, scale);
       const inner = insetPolygonTowardCentroid(outer, sashFace);
       const handleY = topHinged ? freeY - sashFace * 0.48 : freeY + sashFace * 0.48;
       const glassFill = cell.type === "door" ? "rgba(185,122,66,0.30)" : "rgba(188,228,246,0.42)";
@@ -8190,15 +8394,17 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       ];
       for (const item of rects) {
         parts.push(renderPlanCellTracks(item, planY, outlineColor, frameColor, cornerMount));
-        const projections = buildPlanOpeningParts(item.cell, item, planY, section.wallThicknessPx, cornerMount);
-        projections.forEach(entry => {
-          const ratio = options.showOpenState ? cellOpeningRatio(entry.part.cell) : 0;
-          if (entry.kind === "folding") {
-            parts.push(renderPlanFoldingProjection(entry.part, ratio, planY));
-          } else {
-            parts.push(renderPlanPanelProjection(entry.part, ratio, planY, entry.overhead));
-          }
-        });
+	        const projections = buildPlanOpeningParts(item.cell, item, planY, section.wallThicknessPx, cornerMount);
+	        projections.forEach(entry => {
+	          const ratio = options.showOpenState ? cellOpeningRatio(entry.part.cell) : 0;
+	          if (entry.kind === "folding") {
+	            parts.push(renderPlanFoldingProjection(entry.part, ratio, planY));
+	          } else if (entry.overhead) {
+	            parts.push(renderPlanOverheadProjection(entry.part, ratio, planY));
+	          } else {
+	            parts.push(renderPlanPanelProjection(entry.part, ratio, planY));
+	          }
+	        });
       }
       parts.push(renderPlanEngineeringJoints(win, x, planY, drawW, section));
       if (options.showDimensions) {
@@ -8301,9 +8507,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       rects.forEach(item => {
         buildPlanOpeningParts(item.cell, item, 0, wallThicknessPx, cornerMount).forEach(entry => {
           const ratio = cellOpeningRatio(entry.part.cell);
-          const sets = entry.kind === "folding"
-            ? [foldingPlanProjections(entry.part, 0).panels, foldingPlanProjections(entry.part, ratio).panels]
-            : [[openingPlanProjection(entry.part, 0)], [openingPlanProjection(entry.part, ratio)]];
+	          const sets = entry.kind === "folding"
+	            ? [foldingPlanProjections(entry.part, 0).panels, foldingPlanProjections(entry.part, ratio).panels]
+	            : (entry.overhead
+	              ? [[overheadPlanProjection(entry.part, 0)], [overheadPlanProjection(entry.part, ratio)]]
+	              : [[openingPlanProjection(entry.part, 0)], [openingPlanProjection(entry.part, ratio)]]);
           sets.flat().forEach(projection => {
             projection.corners.forEach(point => {
               outside = Math.max(outside, point.z);
@@ -8501,23 +8709,66 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return entries;
     }
 
-    function renderPlanPanelProjection(part, ratio, planY, overhead = false) {
-      const closed = openingPlanProjection(part, 0);
-      const opened = openingPlanProjection(part, ratio);
-      const closedPoints = planProjectionPoints(closed.corners, planY);
-      const openedPoints = planProjectionPoints(opened.corners, planY);
-      const openedCenterY = planY - opened.position.z;
-      const label = escapeHtml(part.label || "活动扇");
-      if (ratio <= 0.001) {
-        return `<g class="plan-opening-projection ${overhead ? "overhead" : ""}" data-plan-panel="${label}">
-          <polygon class="plan-sash-current" points="${openedPoints}" />
-          <title>${label} · 关闭位置</title>
-        </g>`;
-      }
-      return `<g class="plan-opening-projection ${overhead ? "overhead" : ""}" data-plan-panel="${label}">
-        <polygon class="plan-sash-closed" points="${closedPoints}" />
-        ${renderPlanMotionGuide(closed.position, opened.position, planY, label)}
-        <polygon class="plan-sash-current" points="${openedPoints}" />
+	    function overheadPlanProjection(part, ratio) {
+	      const width = Math.max(0.001, Math.abs(Number(part.width) || 0));
+	      const depth = Math.max(0.001, Math.abs(Number(part.depth) || width * 0.025));
+	      const direction = part.cell?.opening?.endsWith("out") ? 1 : -1;
+	      const offset = direction * Math.max(0, Math.min(34, Math.max(10, width * 0.035))) * Math.max(0, Math.min(1, Number(ratio) || 0));
+	      const center = {
+	        x: Number(part.closedPosition?.x || 0),
+	        y: Number(part.closedPosition?.y || 0),
+	        z: Number(part.closedPosition?.z || 0) + offset
+	      };
+	      return {
+	        position: center,
+	        width,
+	        projectedDepth: depth,
+	        corners: [
+	          { x: center.x - width / 2, z: center.z - depth / 2 },
+	          { x: center.x + width / 2, z: center.z - depth / 2 },
+	          { x: center.x + width / 2, z: center.z + depth / 2 },
+	          { x: center.x - width / 2, z: center.z + depth / 2 }
+	        ]
+	      };
+	    }
+
+	    function renderPlanOverheadProjection(part, ratio, planY) {
+	      const closed = overheadPlanProjection(part, 0);
+	      const opened = overheadPlanProjection(part, ratio);
+	      const closedPoints = planProjectionPoints(closed.corners, planY);
+	      const openedPoints = planProjectionPoints(opened.corners, planY);
+	      const label = escapeHtml(part.label || "悬窗");
+	      if (ratio <= 0.001) {
+	        return `<g class="plan-opening-projection overhead" data-plan-panel="${label}">
+	          <polygon class="plan-sash-current" points="${openedPoints}" />
+	          <title>${label} · 关闭位置</title>
+	        </g>`;
+	      }
+	      return `<g class="plan-opening-projection overhead" data-plan-panel="${label}">
+	        <polygon class="plan-sash-closed" points="${closedPoints}" />
+	        ${renderPlanMotionGuide(closed.position, opened.position, planY, label)}
+	        <polygon class="plan-sash-current" points="${openedPoints}" />
+	        <title>${label} · 悬窗开启方向</title>
+	      </g>`;
+	    }
+
+	    function renderPlanPanelProjection(part, ratio, planY) {
+	      const closed = openingPlanProjection(part, 0);
+	      const opened = openingPlanProjection(part, ratio);
+	      const closedPoints = planProjectionPoints(closed.corners, planY);
+	      const openedPoints = planProjectionPoints(opened.corners, planY);
+	      const openedCenterY = planY - opened.position.z;
+	      const label = escapeHtml(part.label || "活动扇");
+	      if (ratio <= 0.001) {
+	        return `<g class="plan-opening-projection" data-plan-panel="${label}">
+	          <polygon class="plan-sash-current" points="${openedPoints}" />
+	          <title>${label} · 关闭位置</title>
+	        </g>`;
+	      }
+	      return `<g class="plan-opening-projection" data-plan-panel="${label}">
+	        <polygon class="plan-sash-closed" points="${closedPoints}" />
+	        ${renderPlanMotionGuide(closed.position, opened.position, planY, label)}
+	        <polygon class="plan-sash-current" points="${openedPoints}" />
         <text class="plan-panel-label" x="${opened.position.x}" y="${openedCenterY - 7}">${label}</text>
         <title>${label} · 当前开启投影</title>
       </g>`;
@@ -9101,9 +9352,28 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       ];
     }
 
-    function isRectangularWindowShape(win) {
-      return normalizeWindowShape(win.shape).type === "rectangular";
-    }
+	    function isRectangularWindowShape(win) {
+	      return normalizeWindowShape(win.shape).type === "rectangular";
+	    }
+
+	    function windowShapeDataForThreeCell(win, width, height) {
+	      if (!win || isRectangularWindowShape(win)) return null;
+	      const shape = normalizeWindowShape(win.shape);
+	      const points = windowShapePoints3d(win, width, height).map(point => ({
+	        x: Math.round(((point.x + width / 2) / Math.max(0.001, width)) * 1000) / 10,
+	        y: Math.round(((height / 2 - point.y) / Math.max(0.001, height)) * 1000) / 10
+	      }));
+	      const normalized = normalizeShapePoints(points);
+	      if (normalized.length < 3) return null;
+	      return {
+	        shapeId: `${win.windowId || "window"}-frame-shape`,
+	        name: shapeLabel(shape.type),
+	        shapeType: shape.type,
+	        angleDeg: Math.round(shape.shapeAngleDeg || defaultShapeAngle(shape.type)),
+	        frameShape: true,
+	        points: normalized
+	      };
+	    }
 
     function cellHasCustomShape(win, row, col) {
       const cols = win?.layout?.columns?.length || 0;
@@ -9231,13 +9501,18 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           lines.push(`<text class="panel-mode-label" x="${(left + right) / 2}" y="${(top + bottom) / 2}">板材</text>`);
         }
       }
-      if (type === "screen" || accessories.screenMode !== "none") {
-        const step = Math.max(16, Math.min(item.w, item.h) / 6);
-        for (let x = item.x + inset; x < item.x + item.w - inset; x += step) {
-          lines.push(`<line class="screen-line" x1="${x}" y1="${item.y + inset}" x2="${x}" y2="${item.y + item.h - inset}" stroke="#3ba47b" stroke-width="1" opacity="0.55" />`);
+	      if (type === "screen" || (accessories.screenMode !== "none" && !isOperableType(type))) {
+        const left = item.x + inset;
+        const right = item.x + item.w - inset;
+        const top = item.y + inset;
+        const bottom = item.y + item.h - inset;
+        for (let index = 1; index < SCREEN_MESH_COLUMNS; index += 1) {
+          const x = left + (right - left) * index / SCREEN_MESH_COLUMNS;
+          lines.push(`<line class="screen-line screen-mesh-line" x1="${x}" y1="${top}" x2="${x}" y2="${bottom}" stroke="#2ca978" stroke-width="0.72" opacity="0.62" />`);
         }
-        for (let y = item.y + inset; y < item.y + item.h - inset; y += step) {
-          lines.push(`<line class="screen-line" x1="${item.x + inset}" y1="${y}" x2="${item.x + item.w - inset}" y2="${y}" stroke="#3ba47b" stroke-width="1" opacity="0.55" />`);
+        for (let index = 1; index < SCREEN_MESH_ROWS; index += 1) {
+          const y = top + (bottom - top) * index / SCREEN_MESH_ROWS;
+          lines.push(`<line class="screen-line screen-mesh-line" x1="${left}" y1="${y}" x2="${right}" y2="${y}" stroke="#2ca978" stroke-width="0.72" opacity="0.62" />`);
         }
       }
       if (type === "louver" || infillType === "louver") {
@@ -10104,6 +10379,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       addThreeGridFrameMembers(frameMount, win, colEdges, rowEdges, innerW, innerH, face, depth, mats);
       if (project.viewOptions?.show3dDimensions !== false) {
         addThreeDimensionGuides(model, win, width, height, depth);
+        addThreeShapeAnnotations(model, win, width, height, depth);
       }
       if (showOrientationLabels && project.viewOptions?.show3dOrientation !== false) {
         addThreeOrientationLabels(model, -width / 2, width, -height / 2, depth, 0, cornerMount);
@@ -10112,10 +10388,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addThreeWindowRootMarkups(frameMount, win, width, height, depth, scale);
       }
 
-      const cols = win.layout.columns.length;
-      const rows = win.layout.rows.length;
-      for (let r = 0; r < rows; r += 1) {
-        for (let c = 0; c < cols; c += 1) {
+	      const cols = win.layout.columns.length;
+	      const rows = win.layout.rows.length;
+	      const singleCellShapeData = rows === 1 && cols === 1 ? windowShapeDataForThreeCell(win, width, height) : null;
+	      for (let r = 0; r < rows; r += 1) {
+	        for (let c = 0; c < cols; c += 1) {
           const left = colEdges[c];
           const right = colEdges[c + 1];
           const bottom = rowEdges[rows - r - 1];
@@ -10127,10 +10404,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             w: Math.max(0.02, right - left - face * 0.03),
             h: Math.max(0.02, top - bottom - face * 0.03),
             modelScale: scale,
-            face,
-            depth,
-            cornerMount: cornerMount && cell?.type === "corner_slide" ? cornerMount : null
-          }, mats, { row: r, col: c, rows, cols, windowId: win.windowId, windowMark: win.mark });
+	            face,
+	            depth,
+	            shapeData: singleCellShapeData,
+	            cornerMount: cornerMount && cell?.type === "corner_slide" ? cornerMount : null
+	          }, mats, { row: r, col: c, rows, cols, windowId: win.windowId, windowMark: win.mark });
         }
       }
       addThreeTopologyMembers(frameMount, win, colEdges, rowEdges, face, depth, mats);
@@ -10365,18 +10643,21 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       addBox(parent, rect.x, rect.y, z + depth * 0.55, rect.face * 0.08, height, depth * 0.28, mats.hardwareDark);
     }
 
-    function createThreeTextPlane(text, color = "#145da0", height = 0.13) {
+    function createThreeTextPlane(text, color = "#145da0", height = 0.13, options = {}) {
       const THREE = threeLib;
+      const boxed = options.boxed !== false;
       const canvas = document.createElement("canvas");
       canvas.width = 512;
       canvas.height = 128;
       const context = canvas.getContext("2d");
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = "rgba(255,255,255,0.92)";
-      context.fillRect(3, 3, canvas.width - 6, canvas.height - 6);
-      context.strokeStyle = color;
-      context.lineWidth = 5;
-      context.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+      if (boxed) {
+        context.fillStyle = "rgba(255,255,255,0.92)";
+        context.fillRect(3, 3, canvas.width - 6, canvas.height - 6);
+        context.strokeStyle = color;
+        context.lineWidth = 5;
+        context.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+      }
       context.fillStyle = color;
       context.font = '700 46px "Microsoft YaHei", sans-serif';
       context.textAlign = "center";
@@ -10416,6 +10697,52 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       parent.add(heightLabel);
     }
 
+    function addThreeShapeAnnotations(parent, win, width, height, depth) {
+      const shape = normalizeWindowShape(win?.shape);
+      if (shape.type === "rectangular") return;
+      const z = depth / 2 + 0.026;
+      if (shape.type === "arched") {
+        const label = createThreeTextPlane(`拱高 ${Math.round(shape.archHeightMm || 0)} mm`, "#075bbd", Math.max(0.1, Math.min(0.18, height * 0.06)), { boxed: false });
+        label.position.set(0, height / 2 + 0.22, z);
+        label.userData.mountType = "three-shape-angle-label";
+        parent.add(label);
+        return;
+      }
+      if (!isAngledWindowShape(shape.type)) return;
+      const points = windowShapePoints3d(win, width, height);
+      if (points.length < 3) return;
+      const edgeIndexes = {
+        trapezoid: [1, 2],
+        trapezoid_left: [3, 0],
+        trapezoid_peak: [0, 1],
+        notch_top_left: [4, 0],
+        notch_top_right: [1, 2]
+      }[shape.type] || [0, 1];
+      const start = points[edgeIndexes[0]];
+      const end = points[edgeIndexes[1]];
+      if (!start || !end) return;
+      const centroid = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+      centroid.x /= points.length;
+      centroid.y /= points.length;
+      const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const length = Math.hypot(dx, dy);
+      if (length <= 0.001) return;
+      const awayX = mid.x - centroid.x;
+      const awayY = mid.y - centroid.y;
+      const awayLength = Math.hypot(awayX, awayY) || 1;
+      const offset = Math.max(0.05, Math.min(width, height) * 0.024);
+      const material = new threeLib.MeshBasicMaterial({ color: 0x1677ff, depthTest: true, transparent: true, opacity: 0.86 });
+      const guide = addBox(parent, mid.x, mid.y, z - 0.006, length, Math.max(0.006, Math.min(width, height) * 0.0018), 0.004, material);
+      guide.rotation.z = Math.atan2(dy, dx);
+      guide.userData.mountType = "three-shape-angle-guide";
+      const label = createThreeTextPlane(`${Math.round(shape.shapeAngleDeg || defaultShapeAngle(shape.type))}°`, "#075bbd", Math.max(0.07, Math.min(0.12, height * 0.04)), { boxed: false });
+      label.position.set(mid.x + awayX / awayLength * offset, mid.y + awayY / awayLength * offset, z);
+      label.userData.mountType = "three-shape-angle-label";
+      parent.add(label);
+    }
+
     function addThreeWindowRootMarkups(parent, win, width, height, depth, scale) {
       const markups = normalizeWindowMarkups(win?.markups);
       if (!markups.length) return;
@@ -10424,9 +10751,85 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const y = height / 2 - height * Number(markup.yPercent || 0) / 100;
         const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", Math.max(0.1, Math.min(0.22, height * 0.075)));
         label.position.set(x, y, depth / 2 + Math.max(0.045, 52 * scale));
+        label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180;
         label.userData.mountType = "window-root-text-annotation";
         parent.add(label);
       });
+    }
+
+    function cellHasHostedLockMarkup(cell) {
+      return normalizeCellMarkups(cell?.markups).some(markup => markup.kind === "lock");
+    }
+
+    function threeLockHandleDirection(cell) {
+      return String(cell?.opening || "").startsWith("right") ? -1 : 1;
+    }
+
+    function threeMarkupPositionFrom2dPercent(markup, cell, rect, options = {}) {
+      const xPercent = markupPercent(markup, "xPercent");
+      const yPercent = markupPercent(markup, "yPercent");
+      const panelCell = options.mountCell || cell;
+      if (options.localMount && markup.kind === "lock") {
+        const panelWidth = Math.max(0.001, Number(options.panelWidth || rect.w));
+        const panelHeight = Math.max(0.001, Number(options.panelHeight || rect.h));
+        if (options.hingeAxis === "side" && ["turn", "turn_tilt", "door"].includes(panelCell?.type)) {
+          const leftHinged = String(panelCell?.opening || cell?.opening || "").startsWith("left");
+          return {
+            x: leftHinged ? panelWidth : -panelWidth,
+            y: panelHeight / 2 - panelHeight * yPercent / 100
+          };
+        }
+        if (options.hingeAxis === "horizontal" && ["top_hung", "bottom_hung"].includes(panelCell?.type)) {
+          const topHinged = panelCell.type === "top_hung";
+          return {
+            x: panelWidth * (xPercent / 100 - 0.5),
+            y: topHinged ? -panelHeight : panelHeight
+          };
+        }
+        if (panelCell?.type === "vertical_slide") {
+          return {
+            x: panelWidth * (xPercent / 100 - 0.5),
+            y: yPercent >= 50 ? -panelHeight / 2 : panelHeight / 2
+          };
+        }
+        return {
+          x: xPercent >= 50 ? panelWidth / 2 : -panelWidth / 2,
+          y: panelHeight / 2 - panelHeight * yPercent / 100
+        };
+      }
+      if (markup.kind === "lock") {
+        const alongX = rect.x - rect.w / 2 + rect.w * xPercent / 100;
+        const alongY = rect.y + rect.h / 2 - rect.h * yPercent / 100;
+        if (["turn", "turn_tilt", "door"].includes(panelCell?.type)) {
+          const leftHinged = String(panelCell?.opening || cell?.opening || "").startsWith("left");
+          return {
+            x: rect.x + (leftHinged ? rect.w / 2 : -rect.w / 2),
+            y: alongY
+          };
+        }
+        if (panelCell?.type === "top_hung" || panelCell?.type === "bottom_hung") {
+          return {
+            x: alongX,
+            y: panelCell.type === "top_hung" ? rect.y - rect.h / 2 : rect.y + rect.h / 2
+          };
+        }
+        if (panelCell?.type === "vertical_slide") {
+          return {
+            x: alongX,
+            y: yPercent >= 50 ? rect.y - rect.h / 2 : rect.y + rect.h / 2
+          };
+        }
+        return {
+          x: rect.x + (xPercent >= 50 ? rect.w / 2 : -rect.w / 2),
+          y: alongY
+        };
+      }
+      const worldX = rect.x - rect.w / 2 + rect.w * xPercent / 100;
+      const worldY = rect.y + rect.h / 2 - rect.h * yPercent / 100;
+      return {
+        x: worldX - Number(options.originX || 0),
+        y: worldY - Number(options.originY || 0)
+      };
     }
 
     function addThreeCellHostedObjects(parent, cell, rect, mats, options = {}) {
@@ -10436,14 +10839,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const scale = Math.max(0.0001, Number(rect.modelScale || 0.001));
       const z = options.localMount ? Math.max(0.035, rect.depth * 0.42) : rect.depth / 2 + 0.045;
       markups.forEach(markup => {
-        const worldX = rect.x - rect.w / 2 + rect.w * markup.xPercent / 100;
-        const worldY = rect.y + rect.h / 2 - rect.h * markup.yPercent / 100;
-        const x = worldX - Number(options.originX || 0);
-        const y = worldY - Number(options.originY || 0);
+        const { x, y } = threeMarkupPositionFrom2dPercent(markup, cell, rect, options);
         const size = Math.max(0.028, markup.sizeMm * scale);
         if (markup.kind === "text") {
           const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", Math.max(0.1, Math.min(0.2, rect.h * 0.09)));
           label.position.set(x, y, z + 0.012);
+          label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180;
           label.userData.mountType = "cell-text-annotation";
           parent.add(label);
           return;
@@ -10451,7 +10852,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         if (markup.kind === "lock") {
           const lock = addBox(parent, x, y, z, size * 0.45, size, Math.max(0.018, rect.depth * 0.18), mats.hardware);
           lock.userData.mountType = "cell-lock";
-          const handle = addBox(parent, x + size * 0.28, y, z + 0.018, size * 0.58, size * 0.1, Math.max(0.018, rect.depth * 0.12), mats.hardwareDark);
+          const handleDirection = threeLockHandleDirection(options.mountCell || cell);
+          const handle = addBox(parent, x + handleDirection * size * 0.28, y, z + 0.018, size * 0.58, size * 0.1, Math.max(0.018, rect.depth * 0.12), mats.hardwareDark);
           handle.userData.mountType = "cell-lock-handle";
           return;
         }
@@ -10486,8 +10888,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
     }
 
-    function threeOperablePocket(rect) {
-      const inset = Math.max(rect.face * 0.22, rect.depth * 0.12);
+    function threeOperablePocket(rect, options = {}) {
+      const tightShape = Boolean(options.tightShape);
+      const inset = tightShape
+        ? Math.max(rect.face * 0.015, rect.depth * 0.01)
+        : Math.max(rect.face * 0.22, rect.depth * 0.12);
       const width = Math.max(0.04, rect.w - inset * 2);
       const height = Math.max(0.04, rect.h - inset * 2);
       return {
@@ -10502,18 +10907,42 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       };
     }
 
-    function addThreeFrameRebate(parent, rect, mats) {
-      const pocket = threeOperablePocket(rect);
+    function addThreeFrameRebate(parent, rect, mats, options = {}) {
+      const pocket = threeOperablePocket(rect, options);
       const stopFace = Math.max(0.008, rect.face * 0.09);
       const stopDepth = Math.max(0.014, rect.depth * 0.16);
       const stopZ = -rect.depth * 0.32;
       const outerW = Math.max(0.02, rect.w - pocket.inset * 1.3);
       const outerH = Math.max(0.02, rect.h - pocket.inset * 1.3);
-      addBox(parent, rect.x, rect.y + outerH / 2, stopZ, outerW, stopFace, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
-      addBox(parent, rect.x, rect.y - outerH / 2, stopZ, outerW, stopFace, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
-      addBox(parent, rect.x - outerW / 2, rect.y, stopZ, stopFace, outerH, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
-      addBox(parent, rect.x + outerW / 2, rect.y, stopZ, stopFace, outerH, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
+      if (!options.suppressRectStops) {
+        addBox(parent, rect.x, rect.y + outerH / 2, stopZ, outerW, stopFace, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
+        addBox(parent, rect.x, rect.y - outerH / 2, stopZ, outerW, stopFace, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
+        addBox(parent, rect.x - outerW / 2, rect.y, stopZ, stopFace, outerH, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
+        addBox(parent, rect.x + outerW / 2, rect.y, stopZ, stopFace, outerH, stopDepth, mats.hardwareDark).userData.mountType = "frame-rebate-stop";
+      }
       return pocket;
+    }
+
+    function addThreeShapeRebateStops(parent, shapeData, pocket, rect, mats) {
+      if (!shapeData?.points?.length) return;
+      const points = shapeData.points.map(point => ({
+        x: pocket.x - pocket.w / 2 + point.x / 100 * pocket.w,
+        y: pocket.y + pocket.h / 2 - point.y / 100 * pocket.h
+      }));
+      const stopFace = Math.max(0.006, rect.face * 0.075);
+      const stopDepth = Math.max(0.014, rect.depth * 0.16);
+      const stopZ = -rect.depth * 0.32;
+      for (let index = 0; index < points.length; index += 1) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.hypot(dx, dy);
+        if (length <= 0.002) continue;
+        const stop = addBox(parent, (start.x + end.x) / 2, (start.y + end.y) / 2, stopZ, length, stopFace, stopDepth, mats.hardwareDark);
+        stop.rotation.z = Math.atan2(dy, dx);
+        stop.userData.mountType = "shape-frame-rebate-stop";
+      }
     }
 
     function mountThreeCellHostedObjects(parent, cell, rect, mats, meta) {
@@ -10539,17 +10968,22 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           markups: [markup],
           localMount: true,
           originX: center.x,
-          originY: center.y
+          originY: center.y,
+          mountCell: support.cell || cell,
+          hingeAxis: support.hingeAxis || "",
+          panelWidth: support.width || rect.w,
+          panelHeight: support.height || rect.h
         });
       });
       if (fixed.length) addThreeCellHostedObjects(parent, cell, rect, mats, { markups: fixed });
     }
 
-    function addThreeCell(parent, cell, rect, mats, meta) {
-      if (!cell || cell.type === "empty") return;
-      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
-      const infillType = normalizeCellInfillType(cell.infillType);
-      if (!isOperableType(cell.type) && infillType === "panel") {
+	    function addThreeCell(parent, cell, rect, mats, meta) {
+	      if (!cell || cell.type === "empty") return;
+	      const assembly = normalizeOpeningAssembly(cell.type, cell.opening, cell.openingAssembly);
+	      const infillType = normalizeCellInfillType(cell.infillType);
+	      const shapeData = threeCellShapeData(cell, rect);
+	      if (!isOperableType(cell.type) && infillType === "panel") {
         addThreePanelInfill(parent, cell, rect, mats);
         addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
         return;
@@ -10559,20 +10993,20 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
         return;
       }
-      if (cell.customShape && isOperableType(cell.type)) {
-        addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly);
-        addIntegratedScreen(parent, cell, rect, mats, meta);
-        addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
-        return;
-      }
-      if (cell.customShape) addThreeCustomCellGeometry(parent, cell, rect, mats);
+	      if (shapeData && isOperableType(cell.type)) {
+	        addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly);
+	        addIntegratedScreen(parent, cell, rect, mats, meta);
+	        addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
+	        return;
+	      }
+	      if (shapeData) addThreeCustomCellGeometry(parent, cell, rect, mats);
       if (cell.type === "panel") {
         addThreePanelInfill(parent, cell, rect, mats);
         return;
       }
       if (cell.type === "screen") {
         addPane(parent, rect.x, rect.y, 0.045, rect.w * 0.92, rect.h * 0.92, mats.screen);
-        addGrid(parent, rect, mats.screenLine, 5, 5);
+        addGrid(parent, rect, mats.screenLine, SCREEN_MESH_COLUMNS, SCREEN_MESH_ROWS);
         return;
       }
       if (cell.type === "louver") {
@@ -10599,7 +11033,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addSashFrame(sash, 0, 0, sashWidth, sashHeight, pocket.face, pocket.depth, mats.profile);
         addPane(sash, 0, 0, 0.012, Math.max(0.02, sashWidth - pocket.face * 2.35), Math.max(0.02, sashHeight - pocket.face * 2.35), mats.glass);
         const handleY = (topHinged ? -1 : 1) * sashHeight * 0.34;
-        addHorizontalHandle(sash, 0, handleY, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
+        if (!cellHasHostedLockMarkup(cell)) addHorizontalHandle(sash, 0, handleY, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
         addHorizontalHinges(sash, (topHinged ? 1 : -1) * sashHeight * 0.46, sashWidth, rect.face, rect.depth, mats.hardwareDark);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
@@ -10665,9 +11099,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
         return;
       }
-      if (!cell.customShape) addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
-      addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
-    }
+	      if (!shapeData) addPane(parent, rect.x, rect.y, 0.02, rect.w * 0.9, rect.h * 0.9, mats.glass);
+	      addThreeCellOverlays(parent, cell, rect, mats, assembly, meta);
+	    }
 
     function addThreeLouvers(parent, rect, mats) {
       const count = Math.max(4, Math.min(9, Math.floor(rect.h / 0.15)));
@@ -10705,19 +11139,32 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
     }
 
-    function addThreeCustomCellGeometry(parent, cell, rect, mats) {
-      const shapeData = normalizeCellCustomShape(cell.customShape);
-      if (!shapeData || !threeLib) return;
+	    function threeCellShapeData(cell, rect) {
+	      const cellShape = normalizeCellCustomShape(cell?.customShape);
+	      if (cellShape) return cellShape;
+	      const rectShape = normalizeCellCustomShape(rect?.shapeData);
+	      return rectShape ? {
+	        ...rectShape,
+	        frameShape: Boolean(rect?.shapeData?.frameShape),
+	        shapeType: String(rect?.shapeData?.shapeType || ""),
+	        angleDeg: Number(rect?.shapeData?.angleDeg || 0)
+	      } : null;
+	    }
+
+	    function addThreeCustomCellGeometry(parent, cell, rect, mats) {
+	      const shapeData = threeCellShapeData(cell, rect);
+	      if (!shapeData || !threeLib) return;
       const group = new threeLib.Group();
       group.position.set(rect.x, rect.y, 0.03);
       addThreeCustomShapeBody(group, shapeData, rect.w * 0.92, rect.h * 0.92, rect.face * 0.26, rect.depth * 0.5, mats);
       parent.add(group);
     }
 
-    function addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly) {
-      const shapeData = normalizeCellCustomShape(cell.customShape);
-      if (!shapeData || !threeLib) return;
-      const pocket = addThreeFrameRebate(parent, rect, mats);
+	    function addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly) {
+	      const shapeData = threeCellShapeData(cell, rect);
+	      if (!shapeData || !threeLib) return;
+      const pocket = addThreeFrameRebate(parent, rect, mats, { tightShape: shapeData.frameShape, suppressRectStops: shapeData.frameShape });
+      if (shapeData.frameShape) addThreeShapeRebateStops(parent, shapeData, pocket, rect, mats);
       const sashWidth = pocket.w;
       const sashHeight = pocket.h;
       const sideHinged = ["turn", "turn_tilt", "door"].includes(cell.type);
@@ -10763,14 +11210,14 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       addThreeCustomShapeBody(sash, shapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats);
       if (sideHinged) {
-        addHandle(sash, (leftOpening ? 1 : -1) * sashWidth * 0.34, 0, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
+        if (!cellHasHostedLockMarkup(cell)) addHandle(sash, (leftOpening ? 1 : -1) * sashWidth * 0.34, 0, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
         addHinges(sash, (leftOpening ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark);
       } else if (horizontalHinged) {
         const topHinged = cell.type === "top_hung";
-        addHorizontalHandle(sash, 0, (topHinged ? -1 : 1) * sashHeight * 0.34, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
+        if (!cellHasHostedLockMarkup(cell)) addHorizontalHandle(sash, 0, (topHinged ? -1 : 1) * sashHeight * 0.34, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
         addHorizontalHinges(sash, (topHinged ? 1 : -1) * sashHeight * 0.46, sashWidth, rect.face, rect.depth, mats.hardwareDark);
       } else {
-        addHandle(sash, sashWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
+        if (!cellHasHostedLockMarkup(cell)) addHandle(sash, sashWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
       }
       const horizontalDirection = cell.opening?.endsWith("right") || assembly.stackSide === "right" ? 1 : -1;
       const verticalDirection = cell.opening === "slide_down" || assembly.stackSide === "bottom" ? -1 : 1;
@@ -10863,7 +11310,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         } else {
           addPane(sash, 0, 0, 0.012, Math.max(0.02, sashWidth - pocket.face * 2.35), Math.max(0.02, sashHeight - pocket.face * 2.35), mats.glass);
         }
-        addHandle(sash, (left ? 1 : -1) * sashWidth * 0.34, 0, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
+        if (!cellHasHostedLockMarkup(cell)) addHandle(sash, (left ? 1 : -1) * sashWidth * 0.34, 0, pocket.depth / 2 + rect.depth * 0.08, rect.face, mats.hardware);
         addHinges(sash, (left ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
@@ -10905,7 +11352,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sash.position.set(x, rect.y, z);
         addSashFrame(sash, 0, 0, panelWidth, panelHeight, rect.face * 0.28, rect.depth * 0.44, mats.profile);
         addPane(sash, 0, 0, 0.015, panelWidth * 0.75, panelHeight * 0.76, mats.glass);
-        if (panel.movable) addHandle(sash, panelWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
+        if (panel.movable && !cellHasHostedLockMarkup(cell)) addHandle(sash, panelWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
         parent.add(sash);
         if (!panel.movable) return;
         const direction = assembly.stackSide === "both"
@@ -10981,7 +11428,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         Math.max(0.02, sashHeight - sashFace * 2.35),
         mats.glass
       );
-      addHorizontalHandle(sash, 0, -sashHeight * 0.36, rect.depth * 0.58, rect.face, mats.hardware);
+      if (!cellHasHostedLockMarkup(cell)) addHorizontalHandle(sash, 0, -sashHeight * 0.36, rect.depth * 0.58, rect.face, mats.hardware);
       for (const x of [-sashWidth * 0.42, sashWidth * 0.42]) {
         for (const y of [-sashHeight * 0.34, sashHeight * 0.34]) {
           addBox(sash, x, y, -rect.depth * 0.36, rect.face * 0.09, rect.face * 0.5, rect.depth * 0.5, mats.hardwareDark);
@@ -11131,7 +11578,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         }
         addSashFrame(sash, 0, 0, panelWidth, panelHeight, rect.face * 0.27, rect.depth * 0.44, mats.profile);
         addPane(sash, 0, 0, 0.015, panelWidth * 0.72, panelHeight * 0.76, mats.glass);
-        if (panel.movable) addHandle(sash, (rightWing ? -1 : 1) * panelWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
+        if (panel.movable && !cellHasHostedLockMarkup(cell)) addHandle(sash, (rightWing ? -1 : 1) * panelWidth * 0.34, 0, rect.depth * 0.48, rect.face, mats.hardware);
         parent.add(sash);
         if (!panel.movable) return;
         const travel = panelWidth * Math.max(1, wingIndex + 1) * 0.92;
@@ -11204,7 +11651,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sash.position.set(rect.x, y, 0.025 + panel.trackIndex * Math.max(0.035, rect.depth * 0.32));
         addSashFrame(sash, 0, 0, panelWidth, panelHeight, rect.face * 0.28, rect.depth * 0.44, mats.profile);
         addPane(sash, 0, 0, 0.015, panelWidth * 0.76, panelHeight * 0.72, mats.glass);
-        if (panel.movable) addHorizontalHandle(sash, 0, (index === 0 ? -1 : 1) * panelHeight * 0.32, rect.depth * 0.48, rect.face, mats.hardware);
+        if (panel.movable && !cellHasHostedLockMarkup(cell)) addHorizontalHandle(sash, 0, (index === 0 ? -1 : 1) * panelHeight * 0.32, rect.depth * 0.48, rect.face, mats.hardware);
         parent.add(sash);
         if (!panel.movable) return;
         const direction = assembly.stackSide === "both" ? (index === 0 ? -1 : 1) : (assembly.stackSide === "bottom" ? -1 : 1);
@@ -11245,7 +11692,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       addFoldingGroup(parent, cell, rect, mats, meta, assembly, panelCount, panelWidth, panelHeight, assembly.stackSide, 0);
     }
 
-    function addFoldingGroup(parent, cell, rect, mats, meta, assembly, panelCount, panelWidth, panelHeight, side, order) {
+	    function addFoldingGroup(parent, cell, rect, mats, meta, assembly, panelCount, panelWidth, panelHeight, side, order) {
       if (panelCount < 1) return;
       const totalWidth = rect.w * 0.985;
       const foldsRight = side === "right";
@@ -11263,7 +11710,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         foldSegments.push(segment);
         chain = segment;
       }
-      addHandle(foldSegments[panelCount - 1], direction * panelWidth * 0.2, 0, rect.depth * 0.54, rect.face, mats.hardware);
+      if (!cellHasHostedLockMarkup(cell)) addHandle(foldSegments[panelCount - 1], direction * panelWidth * 0.2, 0, rect.depth * 0.54, rect.face, mats.hardware);
       parent.add(foldingRoot);
       registerOpenable({
         cell,
@@ -11283,26 +11730,55 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         foldSegments,
         closedPosition: foldingRoot.position.clone(),
         motionMode: "primary",
-        current: 0,
-        target: 0
-      });
-    }
+	        current: 0,
+	        target: 0
+	      });
+	    }
 
-    function addIntegratedScreen(parent, cell, rect, mats, meta) {
-      const assembly = cell.openingAssembly;
-      const mode = assembly?.screenMode && assembly.screenMode !== "none"
-        ? assembly.screenMode
-        : normalizeCellAccessories(cell.accessories).screenMode;
-      if (!mode || mode === "none") return;
-      const screen = new threeLib.Group();
-      const width = rect.w * 0.88;
-      const height = rect.h * 0.86;
-      screen.position.set(rect.x, rect.y, -Math.max(0.055, rect.depth * 0.52));
-      addSashFrame(screen, 0, 0, width, height, rect.face * 0.18, rect.depth * 0.22, mats.screenLine);
-      addPane(screen, 0, 0, 0.01, width * 0.88, height * 0.88, mats.screen);
-      addGrid(screen, { x: 0, y: 0, w: width, h: height, face: rect.face, depth: rect.depth }, mats.screenLine, 6, 7);
-      parent.add(screen);
-      if (mode === "fixed") return;
+	    function primaryOpenableForCell(meta) {
+	      const matches = preview3d.openables
+	        .filter(part => part.windowId === meta?.windowId && part.row === meta?.row && part.col === meta?.col && !String(part.key || "").endsWith(":screen"))
+	        .sort((a, b) => Number(a.operationOrder || 0) - Number(b.operationOrder || 0));
+	      return matches[0] || null;
+	    }
+
+	    function attachScreenToOpenable(screen, host, rect) {
+	      if (!screen || !host?.object) return false;
+	      const origin = host.localMountOrigin || host.closedPosition || host.object.position;
+	      const center = host.closedPanelCenter || host.closedPosition || host.object.position;
+	      const zOffset = Math.max(0.018, rect.depth * 0.16);
+	      screen.position.set(
+	        Number(center?.x || 0) - Number(origin?.x || 0),
+	        Number(center?.y || 0) - Number(origin?.y || 0),
+	        Number(center?.z || 0) - Number(origin?.z || 0) - zOffset
+	      );
+	      screen.userData.mountType = "integrated-screen-follows-sash";
+	      screen.userData.followHostKey = host.key;
+	      screen.traverse(item => {
+	        item.userData.openableKey = host.key;
+	        item.userData.followHostKey = host.key;
+	      });
+	      host.object.add(screen);
+	      return true;
+	    }
+	
+	    function addIntegratedScreen(parent, cell, rect, mats, meta) {
+	      const assembly = cell.openingAssembly;
+	      const mode = assembly?.screenMode && assembly.screenMode !== "none"
+	        ? assembly.screenMode
+	        : normalizeCellAccessories(cell.accessories).screenMode;
+	      if (!mode || mode === "none") return;
+	      const host = mode !== "fixed" ? primaryOpenableForCell(meta) : null;
+	      const screen = new threeLib.Group();
+	      const width = Math.max(0.02, (host?.width || rect.w) * (host ? 0.92 : 0.88));
+	      const height = Math.max(0.02, (host?.height || rect.h) * (host ? 0.92 : 0.86));
+	      screen.position.set(rect.x, rect.y, -Math.max(0.055, rect.depth * 0.52));
+	      addSashFrame(screen, 0, 0, width, height, rect.face * 0.18, rect.depth * 0.22, mats.screenLine);
+	      addPane(screen, 0, 0, 0.01, width * 0.88, height * 0.88, mats.screen);
+	      addGrid(screen, { x: 0, y: 0, w: width, h: height, face: rect.face, depth: rect.depth }, mats.screenLine, SCREEN_MESH_COLUMNS, SCREEN_MESH_ROWS);
+	      if (host && attachScreenToOpenable(screen, host, rect)) return;
+	      parent.add(screen);
+	      if (mode === "fixed") return;
       const direction = assembly.primarySide === "right" ? 1 : -1;
       registerOpenable({
         cell: { ...cell, opening: `${assembly.primarySide}_in` },
@@ -12508,7 +12984,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             ["所属格", rootHosted ? "窗体根节点" : `${markup.row + 1}行 ${markup.col + 1}列`],
             ["宿主", rootHosted ? "窗体根节点" : (markup.markup.hostCellId || markup.cell.cellId)],
             ["内容/尺寸", markup.markup.kind === "text" ? markup.markup.text : `${Math.round(markup.markup.sizeMm)} mm`],
-            ["位置", `${Math.round(markup.markup.xPercent)}%, ${Math.round(markup.markup.yPercent)}%`]
+            ["位置", `${Math.round(markup.markup.xPercent)}%, ${Math.round(markup.markup.yPercent)}%`],
+            ["旋转", `${normalizeMarkupRotation(markup.markup.rotationDeg)}°`]
           ]
         };
       }
@@ -13302,7 +13779,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         {
           name: "read_design_json",
           title: "读取设计JSON",
-          description: "读取当前朗科门窗设计大师工作台中的完整设计JSON。",
+          description: "读取当前门窗云设计工作台中的完整设计JSON。",
           inputSchema: {
             type: "object",
             properties: {},
@@ -13362,7 +13839,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function bindById(id, eventName, handler) {
       const element = document.getElementById(id);
       if (!element) {
-        console.warn(`[朗科门窗设计大师] 未找到控件 #${id}，已跳过 ${eventName} 事件绑定。`);
+        console.warn(`[门窗云设计] 未找到控件 #${id}，已跳过 ${eventName} 事件绑定。`);
         return;
       }
       element.addEventListener(eventName, handler);

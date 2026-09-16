@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://doormes.local/schemas/door-window-design.v2.schema.json",
-  "title": "朗科门窗设计大师设计JSON",
+  "title": "门窗云设计设计JSON",
   "description": "中国门窗可视化设计平台第二版设计数据格式。保留规则网格，并增加稳定区域ID、框段、局部中梃、项目级拼接料与转角料、多窗组合、三维定位及安装包套。",
   "type": "object",
   "required": ["schemaVersion", "project", "order", "catalog", "windows", "joints", "assemblies"],

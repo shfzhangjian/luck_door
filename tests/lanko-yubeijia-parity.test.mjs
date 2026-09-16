@@ -7,8 +7,8 @@ const css = readFileSync(new URL("../dist/assets/app.css", import.meta.url), "ut
 const joints = readFileSync(new URL("../dist/assets/joints.js", import.meta.url), "utf8");
 const plan = readFileSync(new URL("../docs/lanko-yubeijia-parity-test-plan.md", import.meta.url), "utf8");
 
-assert.ok(html.includes("<title>朗科云设计</title>"), "the parity branch should use the Lanko cloud-design brand");
-assert.ok(html.includes("<h1>朗科云设计</h1>"), "the visible brand should read 朗科云设计");
+assert.ok(html.includes("<title>门窗云设计</title>"), "the parity branch should use the requested door-window cloud-design brand");
+assert.ok(html.includes("<h1>门窗云设计</h1>"), "the visible brand should read 门窗云设计");
 assert.equal(html.includes("豫贝家云设计"), false, "reference brand text should not be copied into the app shell");
 
 [
@@ -356,6 +356,16 @@ assert.ok(app.includes('bindById("btnOneClickScreen", "click", applyScreensToAll
 assert.ok(html.includes("是否带纱"), "TC-15 single-sash screen toggle should remain in the right-click menu");
 assert.ok(app.includes('data-cell-menu-action="screen"') || html.includes('data-cell-menu-action="screen"'), "TC-15 single-sash screen toggle should use the cell menu action");
 assert.ok(css.includes(".screen-line"), "TC-15 added screen areas should show mesh lines in 2D");
+assert.ok(
+  app.includes("const SCREEN_MESH_COLUMNS = 12") &&
+  app.includes("const SCREEN_MESH_ROWS = 14") &&
+  app.includes("index < SCREEN_MESH_COLUMNS") &&
+  app.includes("index < SCREEN_MESH_ROWS") &&
+  app.includes("addGrid(parent, rect, mats.screenLine, SCREEN_MESH_COLUMNS, SCREEN_MESH_ROWS)") &&
+  app.includes("addGrid(screen, { x: 0, y: 0, w: width, h: height, face: rect.face, depth: rect.depth }, mats.screenLine, SCREEN_MESH_COLUMNS, SCREEN_MESH_ROWS)") &&
+  css.includes(".screen-mesh-line"),
+  "TC-15 screen mesh density should be shared and high-density in both 2D and 3D."
+);
 assert.ok(html.includes("板材单扇"), "TC-16 left tool library should expose single-panel board placement");
 assert.ok(html.includes("板材双扇"), "TC-16 left tool library should expose double-panel board placement");
 assert.ok(html.includes('data-panel-mode="single"'), "TC-16 single-panel board tool should carry placement metadata");
