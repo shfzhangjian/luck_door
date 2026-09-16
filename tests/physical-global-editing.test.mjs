@@ -141,12 +141,19 @@ assert.ok(
   app.includes("function addThreeFrameRebate(parent, rect, mats, options = {})") &&
   app.includes('userData.mountType = "frame-rebate-stop"') &&
   app.includes("function threeOpeningPlaneZ(cell, rect, assembly = null, pocket = null)") &&
-  app.includes("rect.depth / 2 - sashDepth / 2 - clearance") &&
+  app.includes("rect.depth / 2 - clearance") &&
+  app.includes("function threeSashLocalZ(rect, pocket, hingeZ)") &&
+  app.includes("function threeSashClosedCenterZ(rect, pocket, hingeZ)") &&
   app.includes("function threeSashHardwareZ(rect, pocket, hingeZ)") &&
   app.includes("const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket)") &&
+  app.includes("const sashLocalZ = threeSashLocalZ(rect, pocket, hingeZ)") &&
+  app.includes("const closedCenterZ = threeSashClosedCenterZ(rect, pocket, hingeZ)") &&
   app.includes("const hardwareZ = threeSashHardwareZ(rect, pocket, hingeZ)") &&
   app.includes("hingeRoot.position.set(hingeX, pocket.y, hingeZ)") &&
   app.includes("hingeRoot.position.set(pocket.x, hingeY, hingeZ)") &&
+  app.includes("sash.position.set(pocket.x - hingeX, 0, sashLocalZ)") &&
+  app.includes("sash.position.set(0, pocket.y - hingeY, sashLocalZ)") &&
+  app.includes("closedPanelCenter = new threeLib.Vector3(pocket.x, pocket.y, closedCenterZ)") &&
   app.includes("addSashFrame(sash, 0, 0, sashWidth, sashHeight, pocket.face, pocket.depth, mats.profile)") &&
   app.includes('hingeRoot.userData.mountType = "side-hinged-mechanism"') &&
   app.includes('hingeAxis: "side"') &&
