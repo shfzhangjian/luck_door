@@ -10900,6 +10900,22 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return threeSashLocalZ(rect, pocket, hingeZ) + side * Math.max(0.012, sashDepth / 2 + rect.depth * 0.03);
     }
 
+    function threeOpeningSashBounds(pocket, rect, options = {}) {
+      const shaped = Boolean(options.shaped);
+      const clearance = Math.max(
+        0.006,
+        rect.face * (shaped ? 0.16 : 0.32),
+        pocket.face * (shaped ? 0.52 : 0.72)
+      );
+      return {
+        x: pocket.x,
+        y: pocket.y,
+        w: Math.max(0.04, pocket.w - clearance * 2),
+        h: Math.max(0.04, pocket.h - clearance * 2),
+        clearance
+      };
+    }
+
     function addFixedVerticalHingePlates(parent, x, centerY, height, face, depth, material, z = depth * 0.08) {
       for (const y of [centerY - height * 0.31, centerY + height * 0.31]) {
         const frameLeaf = addBox(parent, x, y, z, Math.max(0.018, face * 0.12), Math.max(0.06, face * 0.62), Math.max(0.026, depth * 0.3), material);
@@ -11049,9 +11065,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (cell.type === "top_hung" || cell.type === "bottom_hung") {
         const topHinged = cell.type === "top_hung";
         const pocket = addThreeFrameRebate(parent, rect, mats);
-        const sashWidth = pocket.w;
-        const sashHeight = pocket.h;
-        const hingeY = pocket.y + (topHinged ? 1 : -1) * sashHeight / 2;
+        const sashBounds = threeOpeningSashBounds(pocket, rect);
+        const sashWidth = sashBounds.w;
+        const sashHeight = sashBounds.h;
+        const hingeY = sashBounds.y + (topHinged ? 1 : -1) * sashHeight / 2;
         const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket);
         const sashLocalZ = threeSashLocalZ(rect, pocket, hingeZ);
         const closedCenterZ = threeSashClosedCenterZ(rect, pocket, hingeZ);
@@ -11060,7 +11077,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         hingeRoot.position.set(pocket.x, hingeY, hingeZ);
         hingeRoot.userData.mountType = "horizontal-hinged-mechanism";
         const sash = new threeLib.Group();
-        sash.position.set(0, pocket.y - hingeY, sashLocalZ);
+        sash.position.set(0, sashBounds.y - hingeY, sashLocalZ);
         addSashFrame(sash, 0, 0, sashWidth, sashHeight, pocket.face, pocket.depth, mats.profile);
         addPane(sash, 0, 0, 0.012, Math.max(0.02, sashWidth - pocket.face * 2.35), Math.max(0.02, sashHeight - pocket.face * 2.35), mats.glass);
         const handleY = (topHinged ? -1 : 1) * sashHeight * 0.34;
@@ -11068,7 +11085,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addHorizontalHinges(sash, (topHinged ? 1 : -1) * sashHeight * 0.46, sashWidth, rect.face, rect.depth, mats.hardwareDark, hardwareZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedHorizontalHingePlates(parent, rect.x, hingeY, sashWidth, rect.face, rect.depth, mats.hardwareDark, hingeZ);
+        addFixedHorizontalHingePlates(parent, sashBounds.x, hingeY, sashWidth, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         registerOpenable({
           cell,
           key: `${meta.windowId}:${meta.row}:${meta.col}:P1`,
@@ -11083,7 +11100,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           width: sashWidth,
           height: sashHeight,
           closedPosition: hingeRoot.position.clone(),
-          closedPanelCenter: new threeLib.Vector3(pocket.x, pocket.y, closedCenterZ),
+          closedPanelCenter: new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ),
           localMountOrigin: hingeRoot.position.clone(),
           hardwareZ,
           hingeAxis: "horizontal",
@@ -11193,12 +11210,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     }
 
 	    function addThreeCustomOperableCell(parent, cell, rect, mats, meta, assembly) {
-	      const shapeData = threeCellShapeData(cell, rect);
-	      if (!shapeData || !threeLib) return;
+      const shapeData = threeCellShapeData(cell, rect);
+      if (!shapeData || !threeLib) return;
       const pocket = addThreeFrameRebate(parent, rect, mats, { embeddedShape: shapeData.frameShape, suppressRectStops: shapeData.frameShape });
       if (shapeData.frameShape) addThreeShapeRebateStops(parent, shapeData, pocket, rect, mats);
-      const sashWidth = pocket.w;
-      const sashHeight = pocket.h;
+      const sashBounds = threeOpeningSashBounds(pocket, rect, { shaped: shapeData.frameShape });
+      const sashWidth = sashBounds.w;
+      const sashHeight = sashBounds.h;
       const sideHinged = ["turn", "turn_tilt", "door"].includes(cell.type);
       const horizontalHinged = cell.type === "top_hung" || cell.type === "bottom_hung";
       let sash = new threeLib.Group();
@@ -11213,39 +11231,39 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const closedCenterZ = threeSashClosedCenterZ(rect, pocket, hingeZ);
       const hardwareZ = threeSashHardwareZ(rect, pocket, hingeZ);
       if (sideHinged) {
-        const hingeX = pocket.x + (leftOpening ? -1 : 1) * sashWidth / 2;
+        const hingeX = sashBounds.x + (leftOpening ? -1 : 1) * sashWidth / 2;
         const hingeRoot = new threeLib.Group();
-        hingeRoot.position.set(hingeX, pocket.y, hingeZ);
+        hingeRoot.position.set(hingeX, sashBounds.y, hingeZ);
         hingeRoot.userData.mountType = "side-hinged-mechanism";
-        sash.position.set(pocket.x - hingeX, 0, sashLocalZ);
+        sash.position.set(sashBounds.x - hingeX, 0, sashLocalZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedVerticalHingePlates(parent, hingeX, pocket.y, sashHeight, rect.face, rect.depth, mats.hardwareDark, hingeZ);
+        addFixedVerticalHingePlates(parent, hingeX, sashBounds.y, sashHeight, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         openableObject = hingeRoot;
         closedPosition = hingeRoot.position.clone();
-        closedPanelCenter = new threeLib.Vector3(pocket.x, pocket.y, closedCenterZ);
+        closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
         localMountOrigin = hingeRoot.position.clone();
         hingeAxis = "side";
       } else if (horizontalHinged) {
         const topHinged = cell.type === "top_hung";
-        const hingeY = pocket.y + (topHinged ? 1 : -1) * sashHeight / 2;
+        const hingeY = sashBounds.y + (topHinged ? 1 : -1) * sashHeight / 2;
         const hingeRoot = new threeLib.Group();
-        hingeRoot.position.set(pocket.x, hingeY, hingeZ);
+        hingeRoot.position.set(sashBounds.x, hingeY, hingeZ);
         hingeRoot.userData.mountType = "horizontal-hinged-mechanism";
-        sash.position.set(0, pocket.y - hingeY, sashLocalZ);
+        sash.position.set(0, sashBounds.y - hingeY, sashLocalZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedHorizontalHingePlates(parent, pocket.x, hingeY, sashWidth, rect.face, rect.depth, mats.hardwareDark, hingeZ);
+        addFixedHorizontalHingePlates(parent, sashBounds.x, hingeY, sashWidth, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         openableObject = hingeRoot;
         closedPosition = hingeRoot.position.clone();
-        closedPanelCenter = new threeLib.Vector3(pocket.x, pocket.y, closedCenterZ);
+        closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
         localMountOrigin = hingeRoot.position.clone();
         hingeAxis = "horizontal";
       } else {
-        sash.position.set(pocket.x, pocket.y, closedCenterZ);
+        sash.position.set(sashBounds.x, sashBounds.y, closedCenterZ);
         parent.add(sash);
         closedPosition = sash.position.clone();
-        closedPanelCenter = new threeLib.Vector3(pocket.x, pocket.y, closedCenterZ);
+        closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
       }
       addThreeCustomShapeBody(sash, shapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats);
       if (sideHinged) {
@@ -11329,22 +11347,23 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function addSideHungAssembly(parent, cell, rect, mats, meta, assembly) {
       const panelCount = assembly.panelCount;
       const pocket = addThreeFrameRebate(parent, rect, mats);
-      const totalWidth = pocket.w;
+      const sashBounds = threeOpeningSashBounds(pocket, rect);
+      const totalWidth = sashBounds.w;
       const gap = panelCount > 1 && assembly.mullionMode === "fixed_mullion" ? rect.face * 0.16 : rect.face * 0.03;
       const sashWidth = (totalWidth - gap * (panelCount - 1)) / panelCount;
-      const sashHeight = pocket.h;
+      const sashHeight = sashBounds.h;
       const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket);
       const sashLocalZ = threeSashLocalZ(rect, pocket, hingeZ);
       const closedCenterZ = threeSashClosedCenterZ(rect, pocket, hingeZ);
       const hardwareZ = threeSashHardwareZ(rect, pocket, hingeZ);
       assembly.panels.forEach((panel, index) => {
-        const x = pocket.x - totalWidth / 2 + sashWidth / 2 + index * (sashWidth + gap);
+        const x = sashBounds.x - totalWidth / 2 + sashWidth / 2 + index * (sashWidth + gap);
         const panelOpening = `${panel.hingeSide}_${assembly.openPlane}`;
         const panelCell = { ...cell, opening: panelOpening };
         const left = panel.hingeSide === "left";
         const hingeX = x + (left ? -1 : 1) * sashWidth / 2;
         const hingeRoot = new threeLib.Group();
-        hingeRoot.position.set(hingeX, pocket.y, hingeZ);
+        hingeRoot.position.set(hingeX, sashBounds.y, hingeZ);
         hingeRoot.userData.mountType = "side-hinged-mechanism";
         const sash = new threeLib.Group();
         sash.position.set(x - hingeX, 0, sashLocalZ);
@@ -11358,7 +11377,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         addHinges(sash, (left ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark, hardwareZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedVerticalHingePlates(parent, hingeX, pocket.y, sashHeight, rect.face, rect.depth, mats.hardwareDark, hingeZ);
+        addFixedVerticalHingePlates(parent, hingeX, sashBounds.y, sashHeight, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         if (!panel.movable) return;
         registerOpenable({
           cell: panelCell,
@@ -11374,7 +11393,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           width: sashWidth,
           height: sashHeight,
           closedPosition: hingeRoot.position.clone(),
-          closedPanelCenter: new threeLib.Vector3(x, pocket.y, closedCenterZ),
+          closedPanelCenter: new threeLib.Vector3(x, sashBounds.y, closedCenterZ),
           localMountOrigin: hingeRoot.position.clone(),
           hardwareZ,
           hingeAxis: "side",
