@@ -400,7 +400,7 @@
               </label>
               <label>上拱高度 mm<input id="archHeight" type="number" min="0" step="10" /></label>
               <label class="hidden">异形角度 °<input id="shapeAngle" type="number" min="10" max="88" step="1" /></label>
-              <label id="shapePointsField" class="field-wide">DIY点位 %
+              <label id="shapePointsField" class="field-wide">DIY点位坐标
                 <textarea id="shapePoints" rows="3" spellcheck="false" placeholder="0,20 50,0 100,20 100,100 0,100"></textarea>
               </label>
               <button id="btnOpenDiyShapeEditor" class="secondary field-wide" type="button">打开DIY绘制画布</button>
@@ -700,10 +700,10 @@
                   <option value="horizontal">横向</option>
                 </select>
               </label>
-              <label>所在位置 %<input id="memberPosition" type="number" min="8" max="92" step="1" /></label>
+              <label>所在位置 mm<input id="memberPosition" type="number" min="0" step="1" /></label>
               <div class="member-range-row">
-                <label>起点 %<input id="memberSpanStart" type="number" min="0" max="95" step="1" /></label>
-                <label>终点 %<input id="memberSpanEnd" type="number" min="5" max="100" step="1" /></label>
+                <label>起点 mm<input id="memberSpanStart" type="number" min="0" step="1" /></label>
+                <label>终点 mm<input id="memberSpanEnd" type="number" min="1" step="1" /></label>
               </div>
               <label>型材编码<input id="memberProfile" placeholder="默认使用当前系列中梃" /></label>
               <label>连接方式
@@ -775,8 +775,8 @@
                 <label>B侧宽度 mm<input id="jointLegB" type="number" min="10" max="300" step="1" /></label>
               </div>
               <div class="member-range-row">
-                <label>起点 %<input id="jointSpanStart" type="number" min="0" max="95" step="1" /></label>
-                <label>终点 %<input id="jointSpanEnd" type="number" min="5" max="100" step="1" /></label>
+                <label>起点 mm<input id="jointSpanStart" type="number" min="0" step="1" /></label>
+                <label>终点 mm<input id="jointSpanEnd" type="number" min="1" step="1" /></label>
               </div>
               <label>型材编码<input id="jointProfile" /></label>
               <label>相邻框处理
@@ -1432,6 +1432,6 @@
   </div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="assets/app.js?v=20260916-16"></script>
+  <script type="module" src="assets/app.js?v=20260916-18"></script>
 </body>
 </html>

@@ -157,6 +157,12 @@ assert.ok(
   app.includes("const sashGeometry = threeShapedSashGeometry(shapeData, pocket, rect)") &&
   app.includes("const sashShapeData = sashGeometry.shapeData") &&
   app.includes("addThreeCustomShapeBody(sash, sashShapeData") &&
+  app.includes("function addThreeCustomShapeHardware") &&
+  app.includes("const handleInset = threeRectMm(rect, THREE_HARDWARE_HANDLE_INSET_MM)") &&
+  app.includes("addThreeCustomShapeHardware(sash, cell, sashShapeData") &&
+  app.includes("railZ: 0") &&
+  app.includes("selectionZ: 0.006") &&
+  app.includes("const railZ = Number.isFinite(Number(options.railZ))") &&
   app.includes("const sashBounds = threeOpeningSashBounds(pocket, rect") &&
   app.includes("const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket)") &&
   app.includes("const sashLocalZ = threeSashLocalZ(rect, pocket, hingeZ)") &&
@@ -370,6 +376,7 @@ assert.ok(
   app.includes('"local-mullion-clipped", depth * 0.026') &&
   app.includes("selectionObject: sash") &&
   app.includes("const shapeObject = part.selectionObject || part.object") &&
+  app.includes("const selectionZ = Number.isFinite(Number(part.selectionZ))") &&
   app.includes("shapeObject.updateMatrixWorld(true)") &&
   app.includes("applyMatrix4(shapeObject.matrixWorld)") &&
   app.includes("mesh.position.z = zOffset") &&
@@ -443,10 +450,11 @@ assert.ok(
   "Frame, mullion, and operable sash profiles must separate symbolic closed drawings from real open-state drawings for every opening family."
 );
 assert.ok(
-  app.includes("function sizeRatioLabel(sizeMm, weight, total)") &&
+  app.includes("function sizeRatioLabel(sizeMm)") &&
+  app.includes("return `${Math.round(sizeMm)} mm`;") &&
   app.includes("sizeRatioLabel(widthMm, win.layout.columns[c], colTotal)") &&
   app.includes("sizeRatioLabel(heightMm, win.layout.rows[r], rowTotal)"),
-  "Single-window mullion dimensions must show each segment's proportional share."
+  "Single-window mullion dimensions must show absolute mm values without exposing percentages."
 );
 assert.ok(
   !/\.topology-member-profile\s*\{[^}]*fill:/s.test(css) &&

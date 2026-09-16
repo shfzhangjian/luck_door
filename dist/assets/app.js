@@ -73,6 +73,9 @@ const THREE_MODULE_URL = "three";
 const ORBIT_CONTROLS_URL = "three/addons/controls/OrbitControls.js";
 const THREE_FRAME_MEMBER_JOIN_MM = 24;
 const THREE_GLASS_REBATE_OVERLAP_MM = 32;
+const THREE_HARDWARE_HANDLE_INSET_MM = 55;
+const THREE_HARDWARE_HINGE_INSET_MM = 160;
+const THREE_HARDWARE_HINGE_LENGTH_MM = 90;
 const SHAPE_PRESETS = Object.freeze([
   { type: "rectangular", label: "四边框", icon: "□", description: "标准矩形洞口和窗框" },
   { type: "arched", label: "上拱框", icon: "⌒", description: "顶部拱形固定或拼接窗" },
@@ -1356,6 +1359,71 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       );
     }
 
+    function layoutSegmentMm(weights, index, totalMm) {
+      const total = sum(weights || []);
+      return total ? Number(weights?.[index] || 0) / total * Number(totalMm || 0) : 0;
+    }
+
+    function layoutBoundaryMm(weights, index, totalMm) {
+      const total = sum(weights || []);
+      if (!total) return 0;
+      const before = (weights || []).slice(0, index + 1).reduce((result, value) => result + Number(value || 0), 0);
+      return before / total * Number(totalMm || 0);
+    }
+
+    function memberPositionHostMm(win, member, host = null) {
+      const resolvedHost = host || findMemberHost(win?.layout, member);
+      if (!win || !member || !resolvedHost) return 0;
+      return member.orientation === "horizontal"
+        ? layoutSegmentMm(win.layout.rows, resolvedHost.row, win.heightMm)
+        : layoutSegmentMm(win.layout.columns, resolvedHost.col, win.widthMm);
+    }
+
+    function memberSpanHostMm(win, member, host = null) {
+      const resolvedHost = host || findMemberHost(win?.layout, member);
+      if (!win || !member || !resolvedHost) return 0;
+      return member.orientation === "horizontal"
+        ? layoutSegmentMm(win.layout.columns, resolvedHost.col, win.widthMm)
+        : layoutSegmentMm(win.layout.rows, resolvedHost.row, win.heightMm);
+    }
+
+    function memberPositionMm(win, member, host = null) {
+      return memberPositionHostMm(win, member, host) * Number(member?.positionRatio || 0);
+    }
+
+    function memberSpanMm(win, member, host = null) {
+      const spanMm = memberSpanHostMm(win, member, host);
+      return {
+        start: spanMm * Number(member?.span?.startRatio || 0),
+        end: spanMm * Number(member?.span?.endRatio ?? 1)
+      };
+    }
+
+    function markupHostSizeMm(markupContext) {
+      const { win, hostType, row = 0, col = 0 } = markupContext || {};
+      if (!win) return { width: 0, height: 0 };
+      const rootHosted = hostType === "window";
+      return {
+        width: rootHosted ? Number(win.widthMm || 0) : layoutSegmentMm(win.layout.columns, col, win.widthMm),
+        height: rootHosted ? Number(win.heightMm || 0) : layoutSegmentMm(win.layout.rows, row, win.heightMm)
+      };
+    }
+
+    function markupPositionMm(markupContext) {
+      const { markup } = markupContext || {};
+      if (!markup) return { x: 0, y: 0 };
+      const hostSize = markupHostSizeMm(markupContext);
+      return {
+        x: hostSize.width * markupPercent(markup, "xPercent") / 100,
+        y: hostSize.height * markupPercent(markup, "yPercent") / 100
+      };
+    }
+
+    function jointHostSpanMm(win, joint) {
+      if (!win || !joint) return 0;
+      return ["left", "right"].includes(joint.hostEdge) ? Number(win.heightMm || 0) : Number(win.widthMm || 0);
+    }
+
     function currentThroughDivider() {
       if (!selectedDivider.windowId) return null;
       const win = project.windows.find(item => item.windowId === selectedDivider.windowId);
@@ -1367,12 +1435,18 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const total = sum(weights);
       const before = weights.slice(0, index + 1).reduce((result, value) => result + Number(value || 0), 0);
       const spanMm = axis === "column" ? win.widthMm : win.heightMm;
+      const sizes = total ? weights.map(value => Number(value || 0) / total * spanMm) : [];
+      const pairStart = sizes.slice(0, index).reduce((result, value) => result + value, 0);
+      const pairTotal = (sizes[index] || 0) + (sizes[index + 1] || 0);
+      const minimum = pairTotal > 2 ? Math.min(120, Math.max(1, pairTotal / 2 - 1)) : 0;
       return {
         win,
         axis,
         index,
         label: throughDividerLabel(axis, index),
-        positionPercent: total ? before / total * 100 : 50,
+        positionMm: total ? before / total * spanMm : spanMm / 2,
+        minMm: pairStart + minimum,
+        maxMm: pairStart + Math.max(0, pairTotal - minimum),
         beforeMm: total ? Number(weights[index] || 0) / total * spanMm : 0,
         afterMm: total ? Number(weights[index + 1] || 0) / total * spanMm : 0
       };
@@ -1395,7 +1469,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return true;
     }
 
-    function applyThroughDividerPosition(win, axis, index, positionPercent) {
+    function applyThroughDividerPosition(win, axis, index, positionMm) {
       const weights = axis === "column" ? win?.layout?.columns : axis === "row" ? win?.layout?.rows : null;
       if (!win || !weights || weights.length < 2) return false;
       const safeIndex = Math.max(0, Math.min(weights.length - 2, Number(index) || 0));
@@ -1407,7 +1481,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const pairTotal = sizes[safeIndex] + sizes[safeIndex + 1];
       if (pairTotal <= 2) return false;
       const minimum = Math.min(120, Math.max(1, pairTotal / 2 - 1));
-      const requested = spanMm * Math.max(0, Math.min(100, Number(positionPercent))) / 100;
+      const requested = Math.max(0, Math.min(spanMm, Number(positionMm)));
       const nextBoundary = Math.max(pairStart + minimum, Math.min(pairStart + pairTotal - minimum, requested));
       sizes[safeIndex] = nextBoundary - pairStart;
       sizes[safeIndex + 1] = pairTotal - sizes[safeIndex];
@@ -2665,12 +2739,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const member = currentMember(win);
       if (!win || !member) return;
       const throughMode = valueOf("memberThroughMode");
-      const startRatio = throughMode === "continuous" ? 0 : Number(valueOf("memberSpanStart")) / 100;
-      const endRatio = throughMode === "continuous" ? 1 : Number(valueOf("memberSpanEnd")) / 100;
+      const orientation = valueOf("memberOrientation");
+      const host = findMemberHost(win.layout, member);
+      const positionHostMm = host
+        ? (orientation === "horizontal"
+          ? layoutSegmentMm(win.layout.rows, host.row, win.heightMm)
+          : layoutSegmentMm(win.layout.columns, host.col, win.widthMm))
+        : 0;
+      const spanHostMm = host
+        ? (orientation === "horizontal"
+          ? layoutSegmentMm(win.layout.columns, host.col, win.widthMm)
+          : layoutSegmentMm(win.layout.rows, host.row, win.heightMm))
+        : 0;
+      const startRatio = throughMode === "continuous" || spanHostMm <= 0 ? 0 : Math.max(0, Math.min(0.98, Number(valueOf("memberSpanStart")) / spanHostMm));
+      const endRatio = throughMode === "continuous" || spanHostMm <= 0 ? 1 : Math.max(startRatio + 0.02, Math.min(1, Number(valueOf("memberSpanEnd")) / spanHostMm));
+      const positionRatio = positionHostMm > 0
+        ? Math.max(0, Math.min(1, Number(valueOf("memberPosition")) / positionHostMm))
+        : Number(member.positionRatio || 0.5);
       const next = normalizeMember({
         ...member,
-        orientation: valueOf("memberOrientation"),
-        positionRatio: Number(valueOf("memberPosition")) / 100,
+        orientation,
+        positionRatio,
         span: { startRatio, endRatio },
         profileId: valueOf("memberProfile").trim(),
         throughMode,
@@ -2805,18 +2894,20 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!joint || !win) return;
       const nextType = valueOf("jointType");
       const typeChanged = nextType !== joint.type;
+      const nextHostEdge = valueOf("jointHostEdge");
+      const hostSpanMm = jointHostSpanMm(win, { ...joint, hostEdge: nextHostEdge });
       const next = normalizeEngineeringJoint({
         ...joint,
         type: nextType,
         style: typeChanged ? JOINT_STYLE_OPTIONS[nextType][0].value : valueOf("jointStyle"),
         orientation: valueOf("jointOrientation"),
-        hostEdge: valueOf("jointHostEdge"),
+        hostEdge: nextHostEdge,
         angleDeg: typeChanged && nextType === "corner" ? 90 : Number(valueOf("jointAngle")),
         legWidthAMm: Number(valueOf("jointLegA")),
         legWidthBMm: Number(valueOf("jointLegB")),
         span: {
-          startRatio: Number(valueOf("jointSpanStart")) / 100,
-          endRatio: Number(valueOf("jointSpanEnd")) / 100
+          startRatio: hostSpanMm > 0 ? Number(valueOf("jointSpanStart")) / hostSpanMm : 0,
+          endRatio: hostSpanMm > 0 ? Number(valueOf("jointSpanEnd")) / hostSpanMm : 1
         },
         profileId: typeChanged ? defaultJointProfile(nextType, currentSeries(win)) : valueOf("jointProfile").trim(),
         frameTreatment: valueOf("jointFrameTreatment"),
@@ -4153,9 +4244,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const host = findMemberHost(win.layout, member);
         const series = currentSeries(win);
         setValue("memberOrientation", member.orientation);
-        setValue("memberPosition", Math.round(member.positionRatio * 100));
-        setValue("memberSpanStart", Math.round(member.span.startRatio * 100));
-        setValue("memberSpanEnd", Math.round(member.span.endRatio * 100));
+        const memberSpan = memberSpanMm(win, member, host);
+        const memberPositionValue = memberPositionMm(win, member, host);
+        setValue("memberPosition", Math.round(memberPositionValue));
+        setValue("memberSpanStart", Math.round(memberSpan.start));
+        setValue("memberSpanEnd", Math.round(memberSpan.end));
         setValue("memberProfile", member.profileId || series.mullionProfile || "");
         setValue("memberThroughMode", member.throughMode);
         setValue("memberConnectionStart", member.connectionStart);
@@ -4164,8 +4257,25 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         document.getElementById("memberTitle").textContent = `${memberLabel(member, memberIndex)} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`;
         document.getElementById("memberHostLabel").textContent = host ? `${host.col + 1}列${host.row + 1}行 · ${host.cell.cellId}` : "未找到所属窗格";
         const spanDisabled = member.throughMode === "continuous";
-        document.getElementById("memberSpanStart").disabled = spanDisabled;
-        document.getElementById("memberSpanEnd").disabled = spanDisabled;
+        const positionInput = document.getElementById("memberPosition");
+        const spanStartInput = document.getElementById("memberSpanStart");
+        const spanEndInput = document.getElementById("memberSpanEnd");
+        const positionHostMm = memberPositionHostMm(win, member, host);
+        const spanHostMm = memberSpanHostMm(win, member, host);
+        if (positionInput) {
+          positionInput.min = "0";
+          positionInput.max = String(Math.round(positionHostMm));
+        }
+        if (spanStartInput) {
+          spanStartInput.min = "0";
+          spanStartInput.max = String(Math.round(Math.max(0, spanHostMm - 1)));
+          spanStartInput.disabled = spanDisabled;
+        }
+        if (spanEndInput) {
+          spanEndInput.min = "1";
+          spanEndInput.max = String(Math.round(spanHostMm));
+          spanEndInput.disabled = spanDisabled;
+        }
         const length = memberLengthMm(member, win, Number(series.faceWidthMm || 0));
         const hostMembers = win.topology.members.filter(item => item.hostRegionId === member.hostRegionId);
         const partition = partitionTopologyRegion(hostMembers);
@@ -4191,13 +4301,24 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         setValue("jointAngle", joint.angleDeg);
         setValue("jointLegA", joint.legWidthAMm);
         setValue("jointLegB", joint.legWidthBMm);
-        setValue("jointSpanStart", Math.round(joint.span.startRatio * 100));
-        setValue("jointSpanEnd", Math.round(joint.span.endRatio * 100));
+        const jointSpanHostMm = jointHostSpanMm(hostWindow, joint);
+        setValue("jointSpanStart", Math.round(jointSpanHostMm * joint.span.startRatio));
+        setValue("jointSpanEnd", Math.round(jointSpanHostMm * joint.span.endRatio));
         setValue("jointProfile", joint.profileId || defaultJointProfile(joint.type, hostSeries));
         setValue("jointFrameTreatment", joint.frameTreatment);
         setValue("jointPostMode", joint.postMode);
         setValue("jointFastenerSpacing", joint.fastenerSpacingMm);
         setValue("jointNote", joint.note || "");
+        const jointSpanStartInput = document.getElementById("jointSpanStart");
+        const jointSpanEndInput = document.getElementById("jointSpanEnd");
+        if (jointSpanStartInput) {
+          jointSpanStartInput.min = "0";
+          jointSpanStartInput.max = String(Math.round(Math.max(0, jointSpanHostMm - 1)));
+        }
+        if (jointSpanEndInput) {
+          jointSpanEndInput.min = "1";
+          jointSpanEndInput.max = String(Math.round(jointSpanHostMm));
+        }
         document.getElementById("jointTitle").textContent = `${jointLabel(joint, jointIndex)} · ${joint.type === "corner" ? "转角料" : "拼接料"}`;
         document.getElementById("jointHostLabel").textContent = `${hostWindow.mark} · ${edgeLabel(joint.hostEdge)}`;
         document.getElementById("jointAngleField").classList.toggle("hidden", joint.type !== "corner");
@@ -5429,7 +5550,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         }
         const sizePx = Math.max(8, markup.sizeMm * scale);
         const sizeText = `${Math.round(markup.sizeMm)} mm`;
-        const offsetText = `X ${Math.round(markup.offsetXPercent)}% · Y ${Math.round(markup.offsetYPercent)}%`;
+        const hostWidthMm = item.w / Math.max(0.0001, scale);
+        const hostHeightMm = item.h / Math.max(0.0001, scale);
+        const offsetX = hostWidthMm * markupPercent(markup, "offsetXPercent") / 100;
+        const offsetY = hostHeightMm * markupPercent(markup, "offsetYPercent") / 100;
+        const offsetText = `X ${Math.round(offsetX)} mm · Y ${Math.round(offsetY)} mm`;
         if (markup.kind === "circle_hole") {
           return `<g ${common} aria-label="圆孔，双击编辑尺寸和定位">
             <circle class="glass-hole-shape" cx="${cx}" cy="${cy}" r="${sizePx / 2}" />
@@ -5994,7 +6119,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const hitPad = Math.max(10, handleFace * 0.7);
       const hitSize = Math.max(20, handleFace * 1.4);
       const attrs = `data-geometry-window="${escapeHtml(win.windowId)}" data-unit-scale="${scale}"`;
-      const parts = [`<g class="geometry-drag-layer" aria-label="拖动调整窗体尺寸和中梃比例">`];
+      const parts = [`<g class="geometry-drag-layer" aria-label="拖动调整窗体尺寸和中梃位置">`];
       parts.push(`<g class="geometry-drag-handle window-width-handle" ${attrs} data-geometry-kind="window" data-geometry-axis="width" tabindex="0">
         <line x1="${x + width}" y1="${y + 10}" x2="${x + width}" y2="${y + height - 10}" />
         <circle cx="${x + width}" cy="${y + height / 2}" r="7" />
@@ -6527,10 +6652,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!found || !input || !shell) return;
       activeMarkupEditor = { markupId };
       input.type = "text";
+      const position = markupPositionMm(found);
       input.value = found.markup.kind === "text"
         ? `${found.markup.text || "文字标注"},${normalizeMarkupRotation(found.markup.rotationDeg)}`
-        : `${Math.round(found.markup.sizeMm)},${Math.round(found.markup.xPercent)},${Math.round(found.markup.yPercent)},${normalizeMarkupRotation(found.markup.rotationDeg)}`;
-      input.placeholder = found.markup.kind === "text" ? "文字,角度°" : "尺寸mm,X%,Y%,角度°";
+        : `${Math.round(found.markup.sizeMm)},${Math.round(position.x)},${Math.round(position.y)},${normalizeMarkupRotation(found.markup.rotationDeg)}`;
+      input.placeholder = found.markup.kind === "text" ? "文字,角度°" : "尺寸mm,Xmm,Ymm,角度°";
       const bounds = shell.getBoundingClientRect();
       const left = Number.isFinite(event.clientX) ? event.clientX - bounds.left : bounds.width / 2;
       const top = Number.isFinite(event.clientY) ? event.clientY - bounds.top : bounds.height / 2;
@@ -6560,10 +6686,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         found.markup.text = parsed.text;
         found.markup.rotationDeg = parsed.rotationDeg;
       } else {
-        const [size, xPercent, yPercent, rotationDeg] = input.value.split(/[,\s]+/).map(Number);
+        const [size, xMm, yMm, rotationDeg] = input.value.split(/[,\s]+/).map(Number);
+        const hostSize = markupHostSizeMm(found);
         if (Number.isFinite(size)) found.markup.sizeMm = Math.max(10, Math.min(300, size));
-        if (Number.isFinite(xPercent)) found.markup.xPercent = Math.max(4, Math.min(96, xPercent));
-        if (Number.isFinite(yPercent)) found.markup.yPercent = Math.max(4, Math.min(96, yPercent));
+        if (Number.isFinite(xMm) && hostSize.width > 0) found.markup.xPercent = Math.max(4, Math.min(96, xMm / hostSize.width * 100));
+        if (Number.isFinite(yMm) && hostSize.height > 0) found.markup.yPercent = Math.max(4, Math.min(96, yMm / hostSize.height * 100));
         if (Number.isFinite(rotationDeg)) found.markup.rotationDeg = normalizeMarkupRotation(rotationDeg, found.markup.rotationDeg);
         found.markup.offsetXPercent = found.markup.xPercent - 50;
         found.markup.offsetYPercent = found.markup.yPercent - 50;
@@ -6676,24 +6803,27 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         if (!selected || selected.axis !== axis || selected.index !== index) return null;
         return {
           target,
-          current: selected.positionPercent,
-          min: 1,
-          max: 99,
+          current: selected.positionMm,
+          min: Math.round(selected.minMm),
+          max: Math.round(selected.maxMm),
           label: selected.label,
-          unit: "%"
+          unit: "mm"
         };
       }
       if (target?.startsWith("localMemberPosition:")) {
         const memberId = target.split(":")[1] || "";
         const member = win.topology?.members?.find(item => item.memberId === memberId);
         if (!member) return null;
+        const host = findMemberHost(win.layout, member);
+        const hostSizeMm = memberPositionHostMm(win, member, host);
+        const edgeClearanceMm = Math.min(120, Math.max(1, hostSizeMm / 2 - 1));
         return {
           target,
-          current: Number(member.positionRatio || 0.5) * 100,
-          min: 8,
-          max: 92,
+          current: memberPositionMm(win, member, host),
+          min: Math.round(edgeClearanceMm),
+          max: Math.round(Math.max(edgeClearanceMm, hostSizeMm - edgeClearanceMm)),
           label: `${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}位置`,
-          unit: "%"
+          unit: "mm"
         };
       }
       return null;
@@ -6738,7 +6868,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const member = win.topology?.members?.find(item => item.memberId === memberId);
         const host = findMemberHost(win.layout, member);
         if (member && host) {
-          member.positionRatio = Math.max(0.08, Math.min(0.92, value / 100));
+          const hostSizeMm = memberPositionHostMm(win, member, host);
+          if (hostSizeMm > 0) member.positionRatio = Math.max(0, Math.min(1, value / hostSizeMm));
           selectedMemberId = member.memberId;
           selectedCell = { row: host.row, col: host.col };
           clearDividerSelection();
@@ -9612,6 +9743,152 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return threeScaledMm(rect?.modelScale, mm);
     }
 
+    function threeShapeLocalPoints(shapeData, width, height) {
+      return normalizeShapePoints(shapeData?.points || []).map(point => ({
+        x: -width / 2 + Number(point.x || 0) / 100 * width,
+        y: height / 2 - Number(point.y || 0) / 100 * height
+      }));
+    }
+
+    function threeEdgeDescriptor(start, end) {
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const length = Math.hypot(dx, dy);
+      const topPoint = start.y >= end.y ? start : end;
+      const bottomPoint = start.y >= end.y ? end : start;
+      const leftPoint = start.x <= end.x ? start : end;
+      const rightPoint = start.x <= end.x ? end : start;
+      return {
+        start,
+        end,
+        length,
+        angle: Math.atan2(dy, dx),
+        center: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
+        topPoint,
+        bottomPoint,
+        leftPoint,
+        rightPoint,
+        verticalSpan: Math.abs(dy),
+        horizontalSpan: Math.abs(dx)
+      };
+    }
+
+    function threePolygonSideEdgeByX(points, preferMax = true) {
+      const clean = cleanThreePolygonPoints(points);
+      let best = null;
+      const epsilon = 0.000001;
+      for (let index = 0; index < clean.length; index += 1) {
+        const edge = threeEdgeDescriptor(clean[index], clean[(index + 1) % clean.length]);
+        if (edge.length <= epsilon) continue;
+        const score = edge.center.x;
+        if (!best) {
+          best = { ...edge, score };
+          continue;
+        }
+        const betterSide = preferMax ? score > best.score + epsilon : score < best.score - epsilon;
+        const tieOnSide = Math.abs(score - best.score) <= epsilon && edge.verticalSpan > best.verticalSpan;
+        if (betterSide || tieOnSide) best = { ...edge, score };
+      }
+      return best;
+    }
+
+    function threePolygonSideEdgeByY(points, preferMax = true) {
+      const clean = cleanThreePolygonPoints(points);
+      let best = null;
+      const epsilon = 0.000001;
+      for (let index = 0; index < clean.length; index += 1) {
+        const edge = threeEdgeDescriptor(clean[index], clean[(index + 1) % clean.length]);
+        if (edge.length <= epsilon) continue;
+        const score = edge.center.y;
+        if (!best) {
+          best = { ...edge, score };
+          continue;
+        }
+        const betterSide = preferMax ? score > best.score + epsilon : score < best.score - epsilon;
+        const tieOnSide = Math.abs(score - best.score) <= epsilon && edge.horizontalSpan > best.horizontalSpan;
+        if (betterSide || tieOnSide) best = { ...edge, score };
+      }
+      return best;
+    }
+
+    function threePointAlongEdge(from, to, distance) {
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      if (length <= 0.000001) return { ...from };
+      const step = Math.max(0, Math.min(length, Number(distance) || 0)) / length;
+      return {
+        x: from.x + (to.x - from.x) * step,
+        y: from.y + (to.y - from.y) * step
+      };
+    }
+
+    function threeEdgeHardwarePoints(edge, inset, hardwareLength) {
+      if (!edge || edge.length <= 0.000001) return [];
+      const safeInset = Math.max(0, Number(inset) || 0);
+      const safeLength = Math.max(0.001, Number(hardwareLength) || 0.001);
+      if (edge.length <= safeLength * 2.4) return [edge.center];
+      const maximumInset = Math.max(0, edge.length / 2 - safeLength * 0.7);
+      const finalInset = Math.min(safeInset, maximumInset);
+      return [
+        threePointAlongEdge(edge.topPoint, edge.bottomPoint, finalInset),
+        threePointAlongEdge(edge.bottomPoint, edge.topPoint, finalInset)
+      ];
+    }
+
+    function addThreeHardwareLeaf(parent, point, edge, face, depth, material, z, alongLength = 0) {
+      if (!point || !edge) return;
+      const leafLength = Math.max(0.035, alongLength || face * 0.58);
+      const leafWidth = Math.max(0.018, face * 0.14);
+      const leafDepth = Math.max(0.025, depth * 0.22);
+      const leaf = addBox(parent, point.x, point.y, z, leafWidth, leafLength, leafDepth, material);
+      leaf.rotation.z = edge.angle - Math.PI / 2;
+      leaf.userData.mountType = "diy-hardware-hinge-leaf";
+    }
+
+    function addThreeShapeHingeLeaves(parent, edge, rect, face, depth, material, z) {
+      if (!edge) return;
+      const requestedLength = threeRectMm(rect, THREE_HARDWARE_HINGE_LENGTH_MM);
+      const edgeEndClearance = threeRectMm(rect, 40);
+      const hingeLength = Math.max(0.035, Math.min(requestedLength, Math.max(0.035, edge.length - edgeEndClearance)));
+      const hingeInset = threeRectMm(rect, THREE_HARDWARE_HINGE_INSET_MM);
+      threeEdgeHardwarePoints(edge, hingeInset, hingeLength).forEach(point => {
+        addThreeHardwareLeaf(parent, point, edge, face, depth, material, z, hingeLength);
+      });
+    }
+
+    function addThreeCustomShapeHardware(parent, cell, shapeData, width, height, rect, pocket, mats, hardwareZ) {
+      const points = threeShapeLocalPoints(shapeData, width, height);
+      if (points.length < 3) return;
+      const sideHinged = ["turn", "turn_tilt", "door"].includes(cell.type);
+      const horizontalHinged = cell.type === "top_hung" || cell.type === "bottom_hung";
+      const handleInset = threeRectMm(rect, THREE_HARDWARE_HANDLE_INSET_MM);
+      const face = pocket?.face || rect.face;
+      const depth = pocket?.depth || rect.depth;
+      if (sideHinged) {
+        const leftOpening = cell.opening?.startsWith("left") || cell.opening?.endsWith("left");
+        const hingeEdge = threePolygonSideEdgeByX(points, !leftOpening);
+        const freeEdge = threePolygonSideEdgeByX(points, leftOpening);
+        if (!cellHasHostedLockMarkup(cell) && freeEdge) {
+          const inward = leftOpening ? -1 : 1;
+          addHandle(parent, freeEdge.center.x + inward * handleInset, freeEdge.center.y, hardwareZ, face, mats.hardware);
+        }
+        addThreeShapeHingeLeaves(parent, hingeEdge, rect, face, depth, mats.hardwareDark, hardwareZ);
+        return;
+      }
+      if (horizontalHinged) {
+        const topHinged = cell.type === "top_hung";
+        const hingeEdge = threePolygonSideEdgeByY(points, topHinged);
+        const freeEdge = threePolygonSideEdgeByY(points, !topHinged);
+        if (!cellHasHostedLockMarkup(cell) && freeEdge) {
+          const inward = topHinged ? 1 : -1;
+          addHorizontalHandle(parent, freeEdge.center.x, freeEdge.center.y + inward * handleInset, hardwareZ, face, mats.hardware);
+        }
+        addThreeShapeHingeLeaves(parent, hingeEdge, rect, face, depth, mats.hardwareDark, hardwareZ);
+        return;
+      }
+      const freeEdge = threePolygonSideEdgeByX(points, true);
+      if (!cellHasHostedLockMarkup(cell) && freeEdge) addHandle(parent, freeEdge.center.x - handleInset, freeEdge.center.y, hardwareZ, face, mats.hardware);
+    }
+
 	    function isRectangularWindowShape(win) {
 	      return normalizeWindowShape(win.shape).type === "rectangular";
 	    }
@@ -10229,9 +10506,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return `<g class="opening-symbol">${openingDirectionSvgLabel(cell, (hingeX + openX) / 2, topEdge + 14)}<path d="M${hingeX} ${hingeY} L${openX} ${topEdge} M${hingeX} ${hingeY} L${openX} ${bottomEdge}" fill="none" stroke="#20383e" stroke-width="2" /></g>`;
     }
 
-    function sizeRatioLabel(sizeMm, weight, total) {
-      const ratio = total ? Number(weight || 0) / total * 100 : 0;
-      return `${Math.round(sizeMm)} / ${Math.round(ratio)}%`;
+    function sizeRatioLabel(sizeMm) {
+      return `${Math.round(sizeMm)} mm`;
     }
 
     function dimensionLine(x1, y1, x2, y2, label, vertical = false, editTarget = "") {
@@ -12103,7 +12379,6 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sash.position.set(sashBounds.x - hingeX, 0, sashLocalZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedVerticalHingePlates(parent, hingeX, sashBounds.y, sashHeight, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         openableObject = hingeRoot;
         closedPosition = hingeRoot.position.clone();
         closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
@@ -12118,7 +12393,6 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sash.position.set(0, sashBounds.y - hingeY, sashLocalZ);
         hingeRoot.add(sash);
         parent.add(hingeRoot);
-        addFixedHorizontalHingePlates(parent, sashBounds.x, hingeY, sashWidth, rect.face, rect.depth, mats.hardwareDark, hingeZ);
         openableObject = hingeRoot;
         closedPosition = hingeRoot.position.clone();
         closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
@@ -12130,17 +12404,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         closedPosition = sash.position.clone();
         closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
       }
-      addThreeCustomShapeBody(sash, sashShapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats);
-      if (sideHinged) {
-        if (!cellHasHostedLockMarkup(cell)) addHandle(sash, (leftOpening ? 1 : -1) * sashWidth * 0.34, 0, hardwareZ, rect.face, mats.hardware);
-        addHinges(sash, (leftOpening ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark, hardwareZ);
-      } else if (horizontalHinged) {
-        const topHinged = cell.type === "top_hung";
-        if (!cellHasHostedLockMarkup(cell)) addHorizontalHandle(sash, 0, (topHinged ? -1 : 1) * sashHeight * 0.34, hardwareZ, rect.face, mats.hardware);
-        addHorizontalHinges(sash, (topHinged ? 1 : -1) * sashHeight * 0.46, sashWidth, rect.face, rect.depth, mats.hardwareDark, hardwareZ);
-      } else {
-        if (!cellHasHostedLockMarkup(cell)) addHandle(sash, sashWidth * 0.34, 0, hardwareZ, rect.face, mats.hardware);
-      }
+      addThreeCustomShapeBody(sash, sashShapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats, {
+        glassZ: 0.004,
+        railZ: 0
+      });
+      addThreeCustomShapeHardware(sash, cell, sashShapeData, sashWidth, sashHeight, rect, pocket, mats, hardwareZ);
       const horizontalDirection = cell.opening?.endsWith("right") || assembly.stackSide === "right" ? 1 : -1;
       const verticalDirection = cell.opening === "slide_down" || assembly.stackSide === "bottom" ? -1 : 1;
       const travel = Math.max(sashWidth, sashHeight) * 0.62;
@@ -12163,6 +12431,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         shapePoints: sashShapeData.points,
         shapeWidth: sashWidth,
         shapeHeight: sashHeight,
+        selectionZ: 0.006,
         travel,
         liftHeight: cell.type === "lift_slide" ? rect.h * 0.035 : 0,
         releaseDepth: ["psk", "parallel_slide", "corner_slide"].includes(cell.type) ? Math.max(0.055, rect.depth * 0.82) : 0,
@@ -12180,11 +12449,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       });
     }
 
-    function addThreeCustomShapeBody(parent, shapeData, width, height, face, depth, mats) {
-      const points = shapeData.points.map(point => ({
-        x: -width / 2 + point.x / 100 * width,
-        y: height / 2 - point.y / 100 * height
-      }));
+    function addThreeCustomShapeBody(parent, shapeData, width, height, face, depth, mats, options = {}) {
+      const points = threeShapeLocalPoints(shapeData, width, height);
+      if (points.length < 3) return;
+      const glassZ = Number.isFinite(Number(options.glassZ)) ? Number(options.glassZ) : 0.01;
+      const railZ = Number.isFinite(Number(options.railZ)) ? Number(options.railZ) : 0.055;
       const shape = new threeLib.Shape();
       points.forEach((point, index) => {
         if (index === 0) shape.moveTo(point.x, point.y);
@@ -12193,7 +12462,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       shape.closePath();
       const glassGeometry = new threeLib.ShapeGeometry(shape);
       const glass = new threeLib.Mesh(glassGeometry, mats.glass);
-      glass.position.z = 0.01;
+      glass.position.z = glassZ;
       glass.userData.mountType = "diy-cell-glass";
       parent.add(glass);
       const edgeRadius = Math.max(0.008, shapeData.frameShape ? face : face * 0.32);
@@ -12204,7 +12473,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const dy = end.y - start.y;
         const length = Math.hypot(dx, dy);
         if (length <= 0.001) continue;
-        const rail = addBox(parent, (start.x + end.x) / 2, (start.y + end.y) / 2, 0.055, length, edgeRadius, depth, mats.profile);
+        const rail = addBox(parent, (start.x + end.x) / 2, (start.y + end.y) / 2, railZ, length, edgeRadius, depth, mats.profile);
         rail.rotation.z = Math.atan2(dy, dx);
         rail.userData.mountType = "diy-cell-frame";
       }
@@ -13362,13 +13631,14 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
       const shapeObject = part.selectionObject || part.object;
       if (!shapeObject) return null;
+      const selectionZ = Number.isFinite(Number(part.selectionZ)) ? Number(part.selectionZ) : 0.006;
       root.updateMatrixWorld(true);
       shapeObject.updateMatrixWorld(true);
       const vertices = [];
       const points = part.shapePoints.map(point => new THREE.Vector3(
         -width / 2 + point.x / 100 * width,
         height / 2 - point.y / 100 * height,
-        0.115
+        selectionZ
       ));
       for (let index = 0; index < points.length; index += 1) {
         const start = points[index].clone().applyMatrix4(shapeObject.matrixWorld);
@@ -13748,14 +14018,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         ].map(divider => {
           const active = selectedDividerMatches(win, divider.axis, divider.index);
           const weights = divider.axis === "column" ? win.layout.columns : win.layout.rows;
-          const total = sum(weights);
-          const before = total ? weights.slice(0, divider.index + 1).reduce((result, value) => result + Number(value || 0), 0) / total * 100 : 0;
+          const positionMm = layoutBoundaryMm(weights, divider.index, divider.axis === "column" ? win.widthMm : win.heightMm);
           return `
             <div class="object-tree-branch">${objectTreeButton({
               active,
               attrs: `data-object-divider-window="${escapeHtml(win.windowId)}" data-object-divider-axis="${escapeHtml(divider.axis)}" data-object-divider-index="${divider.index}"`,
               label: throughDividerLabel(divider.axis, divider.index),
-              meta: `${Math.round(before)}%`,
+              meta: `${Math.round(positionMm)}mm`,
               caret: "•"
             })}</div>
           `;
@@ -13789,12 +14058,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           const localMembers = (win.topology?.members || []).filter(member => member.hostRegionId === cell.cellId);
           const localMemberRows = localMembers.map(member => {
               const memberIndex = win.topology.members.findIndex(item => item.memberId === member.memberId);
+              const host = findMemberHost(win.layout, member);
               return `
                 <div class="object-tree-branch">${objectTreeButton({
                   active: member.memberId === selectedMemberId,
                   attrs: `data-object-member-window="${escapeHtml(win.windowId)}" data-object-member="${escapeHtml(member.memberId)}"`,
                   label: `${escapeHtml(memberLabel(member, memberIndex))} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`,
-                  meta: `${Math.round(Number(member.positionRatio || 0.5) * 100)}%`,
+                  meta: `${Math.round(memberPositionMm(win, member, host))}mm`,
                   caret: "•"
                 })}</div>
               `;
@@ -13908,6 +14178,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const markup = selectedMarkupId ? findMarkupObject(selectedMarkupId) : null;
       if (markup) {
         const rootHosted = markup.hostType === "window";
+        const position = markupPositionMm(markup);
         return {
           title: markup.markup.kind === "text" ? "文字标注" : markupToolLabel(markup.markup.kind),
           rows: [
@@ -13916,7 +14187,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             ["所属格", rootHosted ? "窗体根节点" : `${markup.row + 1}行 ${markup.col + 1}列`],
             ["宿主", rootHosted ? "窗体根节点" : (markup.markup.hostCellId || markup.cell.cellId)],
             ["内容/尺寸", markup.markup.kind === "text" ? markup.markup.text : `${Math.round(markup.markup.sizeMm)} mm`],
-            ["位置", `${Math.round(markup.markup.xPercent)}%, ${Math.round(markup.markup.yPercent)}%`],
+            ["位置", `${Math.round(position.x)} mm, ${Math.round(position.y)} mm`],
             ["旋转", `${normalizeMarkupRotation(markup.markup.rotationDeg)}°`]
           ]
         };
@@ -13928,7 +14199,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           rows: [
             ["所属窗", divider.win.mark],
             ["方向", divider.axis === "column" ? "竖向" : "横向"],
-            ["整窗位置", `${Math.round(divider.positionPercent)}%`],
+            ["整窗位置", `${Math.round(divider.positionMm)} mm`],
             ["前段尺寸", `${Math.round(divider.beforeMm)} mm`],
             ["后段尺寸", `${Math.round(divider.afterMm)} mm`],
             ["调整方式", "画布拖动 / 双击输入"]
@@ -13940,14 +14211,15 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (win && member) {
         const memberIndex = win.topology.members.findIndex(item => item.memberId === member.memberId);
         const host = findMemberHost(win.layout, member);
+        const span = memberSpanMm(win, member, host);
         return {
           title: `${memberLabel(member, memberIndex)} · ${member.orientation === "horizontal" ? "局部横梃" : "局部竖梃"}`,
           rows: [
             ["所属窗", win.mark],
             ["所属格", host ? `${host.row + 1}行 ${host.col + 1}列` : "-"],
             ["方向", member.orientation === "horizontal" ? "横向" : "竖向"],
-            ["所在位置", `${Math.round(Number(member.positionRatio || 0.5) * 100)}%`],
-            ["范围", `${Math.round(Number(member.span?.startRatio || 0) * 100)}% - ${Math.round(Number(member.span?.endRatio || 1) * 100)}%`],
+            ["所在位置", `${Math.round(memberPositionMm(win, member, host))} mm`],
+            ["范围", `${Math.round(span.start)} mm - ${Math.round(span.end)} mm`],
             ["调整方式", "画布拖动 / 双击输入"]
           ]
         };
