@@ -150,6 +150,12 @@ assert.ok(
   app.includes("pocket.face * (shaped ? 0.12 : 0.16)") &&
   app.includes("pocket.w - clearance * 2") &&
   app.includes("pocket.h - clearance * 2") &&
+  app.includes("function threeShapedSashGeometry(shapeData, pocket, rect)") &&
+  app.includes("const insetPoints = insetPolygonTowardCentroid(modelPoints, clearance)") &&
+  app.includes("points: normalizeShapePoints(normalizedPoints)") &&
+  app.includes("const sashGeometry = threeShapedSashGeometry(shapeData, pocket, rect)") &&
+  app.includes("const sashShapeData = sashGeometry.shapeData") &&
+  app.includes("addThreeCustomShapeBody(sash, sashShapeData") &&
   app.includes("const sashBounds = threeOpeningSashBounds(pocket, rect") &&
   app.includes("const hingeZ = threeOpeningPlaneZ(cell, rect, assembly, pocket)") &&
   app.includes("const sashLocalZ = threeSashLocalZ(rect, pocket, hingeZ)") &&

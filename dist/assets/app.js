@@ -10916,6 +10916,45 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       };
     }
 
+    function threeShapedSashGeometry(shapeData, pocket, rect) {
+      const fallbackBounds = threeOpeningSashBounds(pocket, rect, { shaped: true });
+      if (!shapeData?.frameShape || !Array.isArray(shapeData.points) || shapeData.points.length < 3) {
+        return { bounds: fallbackBounds, shapeData };
+      }
+      const clearance = fallbackBounds.clearance;
+      const modelPoints = shapeData.points.map(point => [
+        pocket.x - pocket.w / 2 + point.x / 100 * pocket.w,
+        pocket.y + pocket.h / 2 - point.y / 100 * pocket.h
+      ]);
+      const insetPoints = insetPolygonTowardCentroid(modelPoints, clearance);
+      if (insetPoints.length < 3) return { bounds: fallbackBounds, shapeData };
+      const xs = insetPoints.map(point => point[0]);
+      const ys = insetPoints.map(point => point[1]);
+      const left = Math.min(...xs);
+      const right = Math.max(...xs);
+      const bottom = Math.min(...ys);
+      const top = Math.max(...ys);
+      const width = Math.max(0.04, right - left);
+      const height = Math.max(0.04, top - bottom);
+      const normalizedPoints = insetPoints.map(([x, y]) => ({
+        x: Math.round(((x - left) / width) * 1000) / 10,
+        y: Math.round(((top - y) / height) * 1000) / 10
+      }));
+      return {
+        bounds: {
+          x: (left + right) / 2,
+          y: (bottom + top) / 2,
+          w: width,
+          h: height,
+          clearance
+        },
+        shapeData: {
+          ...shapeData,
+          points: normalizeShapePoints(normalizedPoints)
+        }
+      };
+    }
+
     function addFixedVerticalHingePlates(parent, x, centerY, height, face, depth, material, z = depth * 0.08) {
       for (const y of [centerY - height * 0.31, centerY + height * 0.31]) {
         const frameLeaf = addBox(parent, x, y, z, Math.max(0.018, face * 0.12), Math.max(0.06, face * 0.62), Math.max(0.026, depth * 0.3), material);
@@ -11214,7 +11253,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!shapeData || !threeLib) return;
       const pocket = addThreeFrameRebate(parent, rect, mats, { embeddedShape: shapeData.frameShape, suppressRectStops: shapeData.frameShape });
       if (shapeData.frameShape) addThreeShapeRebateStops(parent, shapeData, pocket, rect, mats);
-      const sashBounds = threeOpeningSashBounds(pocket, rect, { shaped: shapeData.frameShape });
+      const sashGeometry = threeShapedSashGeometry(shapeData, pocket, rect);
+      const sashBounds = sashGeometry.bounds;
+      const sashShapeData = sashGeometry.shapeData;
       const sashWidth = sashBounds.w;
       const sashHeight = sashBounds.h;
       const sideHinged = ["turn", "turn_tilt", "door"].includes(cell.type);
@@ -11265,7 +11306,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         closedPosition = sash.position.clone();
         closedPanelCenter = new threeLib.Vector3(sashBounds.x, sashBounds.y, closedCenterZ);
       }
-      addThreeCustomShapeBody(sash, shapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats);
+      addThreeCustomShapeBody(sash, sashShapeData, sashWidth, sashHeight, pocket.face, pocket.depth, mats);
       if (sideHinged) {
         if (!cellHasHostedLockMarkup(cell)) addHandle(sash, (leftOpening ? 1 : -1) * sashWidth * 0.34, 0, hardwareZ, rect.face, mats.hardware);
         addHinges(sash, (leftOpening ? -1 : 1) * sashWidth * 0.46, sashHeight, rect.face, rect.depth, mats.hardwareDark, hardwareZ);
@@ -11294,7 +11335,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         operationOrder: 0,
         width: sashWidth,
         height: sashHeight,
-        shapePoints: shapeData.points,
+        shapePoints: sashShapeData.points,
         shapeWidth: sashWidth,
         shapeHeight: sashHeight,
         travel,
