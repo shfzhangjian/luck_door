@@ -99,7 +99,7 @@ assert.ok(
   app.includes('mode: "add_root_markup"') &&
   app.includes("function addRootTextMarkupFromEvent") &&
   app.includes("function renderWindowRootMarkups") &&
-  app.includes('class="markup-layer root-markup-layer"') &&
+  app.includes("root-markup-layer text-markup-layer") &&
   app.includes('data-markup-host="window"') &&
   app.includes("function rootMarkupPositionFromEvent") &&
   app.includes("文字标注已挂到窗体根节点"),
@@ -215,13 +215,40 @@ assert.ok(
 );
 assert.ok(
   app.includes("function normalizeMarkupRotation") &&
+  app.includes("function normalizeMarkupTextSize") &&
+  app.includes("function normalizeMarkupTextDirection") &&
+  app.includes("function markupTextDirectionLabel") &&
+  app.includes("function parseMarkupTextEditor") &&
   app.includes("function parseMarkupTextRotation") &&
   app.includes("rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg)") &&
+  app.includes("sizeMm: normalizeMarkupTextSize(value.sizeMm, 80)") &&
+  app.includes("direction: normalizeMarkupTextDirection") &&
   app.includes('class="cell-markup-text-rotor"') &&
+  app.includes('class="cell-markup-text vertical"') &&
+  app.includes('class="cell-markup-rotate-handle"') &&
+  app.includes('class="cell-markup-resize-handle"') &&
+  app.includes("function beginMarkupResize") &&
+  app.includes("function updateMarkupResize") &&
+  app.includes("function commitMarkupResize") &&
+  app.includes("function beginMarkupRotation") &&
+  app.includes("function updateMarkupRotation") &&
+  app.includes("function commitMarkupRotation") &&
   app.includes('transform="rotate(${rotation} ${cx} ${cy})"') &&
+  app.includes('data-markup-size-mm="${sizeMm}"') &&
+  app.includes('data-markup-direction="${direction}"') &&
+  app.includes('data-markup-field="sizeMm"') &&
+  app.includes('data-markup-field="direction"') &&
+  app.includes('{ direction: markup.direction }') &&
+  app.includes('id: "textMarkupLayer"') &&
   app.includes("label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180") &&
+  app.includes("label.material.depthTest = false") &&
   app.includes('["旋转", `${normalizeMarkupRotation(markup.markup.rotationDeg)}°`]'),
-  "2D and 3D text markups must persist and render arbitrary rotation."
+  "2D and 3D text markups must persist size, render above other objects, and support arbitrary flat rotation."
+);
+assert.ok(
+  app.includes("if (win.layout.columns.length > 1)") &&
+  app.includes("if (win.layout.rows.length > 1)"),
+  "Assembly internal dimensions should skip single-row or single-column duplicates that overlap overall dimensions."
 );
 assert.ok(css.includes(".geometry-drag-handle") && css.includes(".internal-joint-zone"), "Canvas geometry and internal-joint hit targets must be styled and discoverable.");
 assert.ok(
@@ -391,15 +418,32 @@ assert.ok(
   app.includes("const projected = markup.kind === \"lock\"") &&
   app.includes("const reveal = Math.max(1.5, Math.min(5") &&
   app.includes("function pointOnSegment(start, end, ratio)") &&
+  app.includes("function edgeUnitVector(edge)") &&
+  app.includes("function edgeNormalForSide(edge, sideDirection = 1)") &&
+  app.includes("function edgeNormalToward(edge, towardPoint, fallbackDirection = 1)") &&
+  app.includes("function projectPointFromHingeFrame(point, frame)") &&
+  app.includes("function edgeBandPolygon(topPoint, bottomPoint, width)") &&
+  app.includes("function edgePlatePolygon(centerPoint, edge, width, length)") &&
+  app.includes("function pointRatioBetweenEdges(point, hingeEdge, freeEdge, bounds)") &&
+  app.includes("function projectPointBetweenEdges(point, closedHingeEdge, closedFreeEdge, openHingeEdge, openFreeEdge, bounds)") &&
   app.includes("const openAngle = openRatio * 78 * Math.PI / 180") &&
+  app.includes("const closedHingeEdge = shapedSash ? polygonSideEdgeByX(metrics.shapedPoints, !leftHinged) : null") &&
+  app.includes("const closedFreeEdge = shapedSash ? polygonSideEdgeByX(metrics.shapedPoints, leftHinged) : null") &&
   app.includes("const hingeX = fixedHingeX") &&
   app.includes("const sideProjection = Math.min(width * 0.055, Math.max(7, sashFace * 0.85)) * Math.sin(openAngle)") &&
-  app.includes("const hingeReturnX = hingeX + sideDirection * sideProjection") &&
-  app.includes("const openProjectedWidth = width * Math.max(0.38, Math.cos(openAngle))") &&
-  app.includes("const freeX = leftHinged ? hingeX + openProjectedWidth : hingeX - openProjectedWidth") &&
   app.includes("const projectionOffsetY = (outward ? -1 : 1) * Math.min(58, Math.max(0, height * 0.14 * Math.sin(openAngle)))") &&
-  app.includes("const topFreeY = top + projectionOffsetY") &&
-  app.includes("const bottomFreeY = top + height + projectionOffsetY") &&
+  app.includes("const openingNormal = edgeNormalToward(closedHinge, closedFreeCenter, leftHinged ? 1 : -1)") &&
+  app.includes("const projectedClosedSpan = Math.abs((closedFreeCenter[0] - closedHingeCenter[0]) * openingNormal.x + (closedFreeCenter[1] - closedHingeCenter[1]) * openingNormal.y)") &&
+  app.includes("const closedSideSpan = Math.max(1, projectedClosedSpan || Math.abs(closedFreeCenter[0] - closedHingeCenter[0]) || width)") &&
+  app.includes("const openScale = Math.max(0.38, Math.cos(openAngle))") &&
+  app.includes("const projectClosedPoint = point => projectPointFromHingeFrame(point, hingeFrame)") &&
+  app.includes("const hingeReturnX = openHingeEdge.center[0] + sideDirection * sideProjection") &&
+  app.includes("const freeX = openFreeEdge.center[0]") &&
+  app.includes("const topFreeY = openFreeEdge.topPoint[1]") &&
+  app.includes("const bottomFreeY = openFreeEdge.bottomPoint[1]") &&
+  app.includes("const hingeNormal = edgeNormalForSide(openHingeEdge, sideDirection)") &&
+  app.includes("const hingeChannelPoints = edgeBandPolygon(openHingeEdge.topPoint, openHingeEdge.bottomPoint, hingeChannelW)") &&
+  app.includes("hingeChannelH: Math.max(1, hingeMaxY - hingeMinY)") &&
   !app.includes("function elevationHiddenLineForPlane(openPlane)") &&
   app.includes("function pointToward(from, to, distance)") &&
   app.includes("function renderOpenSashProfileBands") &&
@@ -429,7 +473,8 @@ assert.ok(
   html.includes('id="shapeAngle"') &&
   app.includes("foregroundOpenCells.push(openElevation)") &&
   app.includes('class="open-sash-side-face"') &&
-  app.includes('class="open-sash-hinge-channel"') &&
+  app.includes('<polygon class="open-sash-hinge-channel" points="${hingeChannelSvgPoints}" />') &&
+  app.includes("edgePlatePolygon(point, openHingeEdge, hingePlateW, hingePlateH)") &&
   app.includes('<path class="opening-symbol-line" d="${openLine}" />') &&
   css.includes(".profile-bevel-highlight") &&
   css.includes(".profile-bevel-shadow") &&

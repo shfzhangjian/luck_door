@@ -462,22 +462,77 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function normalizeMarkupRotation(value, fallback = 0) {
       const number = Number(value);
       const source = Number.isFinite(number) ? number : Number(fallback || 0);
-      return Math.round((Number.isFinite(source) ? source : 0) * 10) / 10;
+      const rounded = Math.round((Number.isFinite(source) ? source : 0) * 10) / 10;
+      return ((rounded % 360) + 360) % 360;
     }
 
-    function parseMarkupTextRotation(value, fallbackRotation = 0) {
+    function normalizeMarkupTextSize(value, fallback = 80) {
+      const number = Number(String(value ?? "").replace(/mm$/iu, ""));
+      const source = Number.isFinite(number) && number > 0 ? number : Number(fallback || 80);
+      return Math.max(20, Math.min(500, Math.round((Number.isFinite(source) ? source : 80) * 10) / 10));
+    }
+
+    function normalizeMarkupTextDirection(value, fallback = "horizontal") {
+      const source = String(value || fallback || "horizontal").trim().toLowerCase();
+      if (["vertical", "vertical-rl", "v", "竖", "竖排", "竖向"].includes(source)) return "vertical";
+      return "horizontal";
+    }
+
+    function markupTextDirectionLabel(value) {
+      return normalizeMarkupTextDirection(value) === "vertical" ? "竖排" : "横排";
+    }
+
+    function parseMarkupTextEditor(value, fallbackRotation = 0, fallbackSize = 80, fallbackDirection = "horizontal") {
       const source = String(value || "").trim();
-      if (!source) return { text: "文字标注", rotationDeg: normalizeMarkupRotation(fallbackRotation) };
-      const parts = source.split(/[，,|｜]/);
-      const last = parts.length > 1 ? parts[parts.length - 1].trim() : "";
-      const maybeAngle = Number(last.replace(/°$/u, ""));
-      if (parts.length > 1 && Number.isFinite(maybeAngle)) {
-        return {
-          text: parts.slice(0, -1).join(",").trim() || "文字标注",
-          rotationDeg: normalizeMarkupRotation(maybeAngle, fallbackRotation)
-        };
+      const fallback = {
+        text: "文字标注",
+        sizeMm: normalizeMarkupTextSize(fallbackSize),
+        rotationDeg: normalizeMarkupRotation(fallbackRotation),
+        direction: normalizeMarkupTextDirection(fallbackDirection)
+      };
+      if (!source) return fallback;
+      const parts = source.split(/[，,|｜]/).map(part => part.trim());
+      const parseNumber = text => Number(String(text || "").replace(/mm$/iu, "").replace(/°$/u, ""));
+      const parseDirection = text => {
+        const normalized = normalizeMarkupTextDirection(text, "");
+        return text && (normalized === "vertical" || ["horizontal", "h", "横", "横排", "横向"].includes(String(text).trim().toLowerCase()))
+          ? normalized
+          : "";
+      };
+      let rotationDeg = fallback.rotationDeg;
+      let sizeMm = fallback.sizeMm;
+      let direction = fallback.direction;
+      if (parts.length > 1) {
+        const lastDirection = parseDirection(parts[parts.length - 1]);
+        if (lastDirection) {
+          direction = lastDirection;
+          parts.pop();
+        }
       }
-      return { text: source, rotationDeg: normalizeMarkupRotation(fallbackRotation) };
+      if (parts.length > 1) {
+        const last = parseNumber(parts[parts.length - 1]);
+        if (Number.isFinite(last)) {
+          rotationDeg = normalizeMarkupRotation(last, fallbackRotation);
+          parts.pop();
+        }
+      }
+      if (parts.length > 1) {
+        const last = parseNumber(parts[parts.length - 1]);
+        if (Number.isFinite(last)) {
+          sizeMm = normalizeMarkupTextSize(last, fallbackSize);
+          parts.pop();
+        }
+      }
+      return {
+        text: parts.join(",").trim() || fallback.text,
+        sizeMm,
+        rotationDeg,
+        direction
+      };
+    }
+
+    function parseMarkupTextRotation(value, fallbackRotation = 0, fallbackSize = 80, fallbackDirection = "horizontal") {
+      return parseMarkupTextEditor(value, fallbackRotation, fallbackSize, fallbackDirection);
     }
 
     function normalizeCellMarkup(value = {}) {
@@ -492,7 +547,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         yPercent,
         offsetXPercent: Math.max(-100, Math.min(100, Number(value.offsetXPercent ?? xPercent - 50))),
         offsetYPercent: Math.max(-100, Math.min(100, Number(value.offsetYPercent ?? yPercent - 50))),
-        sizeMm: Math.max(10, Math.min(300, Number(value.sizeMm || (kind === "text" ? 0 : 60)))),
+        sizeMm: kind === "text"
+          ? normalizeMarkupTextSize(value.sizeMm, 80)
+          : Math.max(10, Math.min(300, Number(value.sizeMm || 60))),
+        direction: kind === "text" ? normalizeMarkupTextDirection(value.direction ?? value.textDirection) : "horizontal",
         rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg),
         hostType: "cell",
         hostWindowId: String(value.hostWindowId || ""),
@@ -517,7 +575,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         yPercent,
         offsetXPercent: Math.max(-200, Math.min(200, Number(value.offsetXPercent ?? xPercent - 50))),
         offsetYPercent: Math.max(-200, Math.min(200, Number(value.offsetYPercent ?? yPercent - 50))),
-        sizeMm: 0,
+        sizeMm: normalizeMarkupTextSize(value.sizeMm, 80),
+        direction: normalizeMarkupTextDirection(value.direction ?? value.textDirection),
         rotationDeg: normalizeMarkupRotation(value.rotationDeg ?? value.angleDeg),
         hostType: "window",
         hostWindowId: String(value.hostWindowId || ""),
@@ -542,7 +601,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return normalizeCellMarkup({
         kind,
         text: kind === "text" ? "文字标注" : "",
-        sizeMm: kind === "text" ? 0 : (kind === "lock" ? 35 : 60),
+        sizeMm: kind === "text" ? 80 : (kind === "lock" ? 35 : 60),
         ...options
       });
     }
@@ -5434,11 +5493,14 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (!["turn", "turn_tilt", "door"].includes(cell?.type)) return null;
       if (cell.openingAssembly?.panelCount > 1) return null;
       const geometry = sideHungSashGeometry(cell, item, scale);
-      const { leftTop, rightTop, leftBottom, rightBottom, leftHinged } = geometry;
+      const { left, top, width, height, leftTop, rightTop, leftBottom, rightBottom, leftHinged } = geometry;
       const u = markup.kind === "lock"
         ? (leftHinged ? 1 : 0)
         : Math.max(0, Math.min(1, Number(markup.xPercent || 0) / 100));
       const v = Math.max(0, Math.min(1, Number(markup.yPercent || 0) / 100));
+      if (typeof geometry.projectClosedPoint === "function") {
+        return geometry.projectClosedPoint([left + width * u, top + height * v]);
+      }
       const topX = leftTop[0] + (rightTop[0] - leftTop[0]) * u;
       const topY = leftTop[1] + (rightTop[1] - leftTop[1]) * u;
       const bottomX = leftBottom[0] + (rightBottom[0] - leftBottom[0]) * u;
@@ -5500,35 +5562,70 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       };
     }
 
-    function renderTextMarkup(markup, cx, cy, common) {
-      const text = escapeHtml(markup.text || "文字标注");
-      const width = Math.max(64, text.length * 11 + 20);
+    function renderTextMarkup(markup, cx, cy, common, scale = 1) {
+      const rawText = String(markup.text || "文字标注");
+      const text = escapeHtml(rawText);
+      const direction = normalizeMarkupTextDirection(markup.direction);
+      const chars = Array.from(rawText || "文字标注");
+      const sizeMm = normalizeMarkupTextSize(markup.sizeMm, 80);
+      const fontSize = Math.max(10, Math.min(48, sizeMm * Math.max(0.0001, scale)));
+      const vertical = direction === "vertical";
+      const lineGap = fontSize * 1.12;
+      const width = vertical
+        ? Math.max(fontSize * 2.25, fontSize * 1.75)
+        : Math.max(fontSize * 4.8, chars.length * fontSize * 0.82 + fontSize * 1.8);
+      const height = vertical
+        ? Math.max(fontSize * 2.6, chars.length * lineGap + fontSize * 1.15)
+        : Math.max(22, fontSize * 2.15);
       const rotation = normalizeMarkupRotation(markup.rotationDeg);
       const transform = rotation ? ` transform="rotate(${rotation} ${cx} ${cy})"` : "";
-      return `<g ${common} aria-label="文字标注，双击编辑，拖动调整位置">
+      const handleX = cx + width / 2 + 16;
+      const handleY = cy - height / 2 - 10;
+      const resizeHandleX = cx + width / 2 + 16;
+      const resizeHandleY = cy + height / 2 + 10;
+      const startY = cy - ((chars.length - 1) * lineGap) / 2 + fontSize * 0.35;
+      const textSvg = vertical
+        ? `<text class="cell-markup-text vertical" x="${cx}" y="${cy}" style="font-size:${fontSize}px">${chars.map((char, index) => `<tspan x="${cx}" y="${startY + index * lineGap}">${escapeHtml(char === " " ? "\u00A0" : char)}</tspan>`).join("")}</text>`
+        : `<text class="cell-markup-text" x="${cx}" y="${cy + fontSize * 0.35}" style="font-size:${fontSize}px">${text}</text>`;
+      return `<g ${common} data-markup-cx="${cx}" data-markup-cy="${cy}" data-markup-size-mm="${sizeMm}" data-markup-direction="${direction}" aria-label="文字标注，双击编辑，拖动调整位置">
         <g class="cell-markup-text-rotor"${transform}>
-          <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - 14}" width="${width}" height="28" rx="2" />
-          <text class="cell-markup-text" x="${cx}" y="${cy + 4}">${text}</text>
+          <rect class="cell-markup-text-box" x="${cx - width / 2}" y="${cy - height / 2}" width="${width}" height="${height}" rx="2" />
+          ${textSvg}
+          <g class="cell-markup-rotate-handle" data-markup-rotate-handle="true" transform="translate(${handleX} ${handleY})" aria-label="拖动旋转文字标注">
+            <line class="cell-markup-rotate-stem" x1="-10" y1="10" x2="-3" y2="3" />
+            <circle class="cell-markup-rotate-dot" cx="0" cy="0" r="8" />
+            <path class="cell-markup-rotate-icon" d="M-3 -2 A4 4 0 1 1 2 4 M2 4 L2 0 M2 4 L6 4" />
+          </g>
+          <g class="cell-markup-resize-handle" data-markup-resize-handle="true" transform="translate(${resizeHandleX} ${resizeHandleY})" aria-label="拖动调整文字大小">
+            <line class="cell-markup-resize-stem" x1="-10" y1="-10" x2="-3" y2="-3" />
+            <rect class="cell-markup-resize-box" x="-7" y="-7" width="14" height="14" rx="2" />
+            <path class="cell-markup-resize-icon" d="M-3 4 H4 V-3 M-4 4 L4 -4" />
+          </g>
         </g>
       </g>`;
     }
 
-    function renderWindowRootMarkups(win, frame, scale) {
+    function renderWindowRootMarkups(win, frame, scale, options = {}) {
       const markups = normalizeWindowMarkups(win?.markups);
       if (!markups.length || !frame) return "";
       const content = markups.map(markup => {
         const cx = frame.x + frame.w * Number(markup.xPercent || 0) / 100;
         const cy = frame.y + frame.h * Number(markup.yPercent || 0) / 100;
         const common = `class="cell-markup root-markup text ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-markup-host="window" data-window-id="${escapeHtml(win.windowId || "")}" data-root-x="${frame.x}" data-root-y="${frame.y}" data-root-w="${frame.w}" data-root-h="${frame.h}" tabindex="0" role="button"`;
-        return renderTextMarkup(markup, cx, cy, common);
+        return renderTextMarkup(markup, cx, cy, common, scale);
       }).join("");
-      return `<g class="markup-layer root-markup-layer" data-window-id="${escapeHtml(win.windowId || "")}">${content}</g>`;
+      const className = options.className || "markup-layer root-markup-layer text-markup-layer";
+      return `<g class="${className}" data-window-id="${escapeHtml(win.windowId || "")}">${content}</g>`;
     }
 
-    function renderCellMarkups(cell, item, scale) {
+    function renderCellMarkups(cell, item, scale, options = {}) {
       const markups = normalizeCellMarkups(cell?.markups);
       if (!markups.length) return "";
-      return markups.map(markup => {
+      return markups.filter(markup => {
+        if (options.textOnly) return markup.kind === "text";
+        if (options.nonTextOnly) return markup.kind !== "text";
+        return true;
+      }).map(markup => {
         const projected = markup.kind === "lock"
           ? lockMarkupPointOnSashFrame(cell, item, scale, markup)
           : projectMarkupPointForOpenSash(cell, item, scale, markup);
@@ -5536,7 +5633,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const cy = projected?.y ?? item.y + item.h * markup.yPercent / 100;
         const common = `class="cell-markup ${markup.kind} ${markup.markupId === selectedMarkupId ? "active" : ""}" data-markup-id="${escapeHtml(markup.markupId)}" data-markup-host="cell" data-window-id="${escapeHtml(item.windowId || "")}" data-row="${item.row}" data-col="${item.col}" data-cell-x="${item.x}" data-cell-y="${item.y}" data-cell-w="${item.w}" data-cell-h="${item.h}" tabindex="0" role="button"`;
         if (markup.kind === "text") {
-          return renderTextMarkup(markup, cx, cy, common);
+          return renderTextMarkup(markup, cx, cy, common, scale);
         }
         if (markup.kind === "lock") {
           const lockW = Math.max(14, markup.sizeMm * scale * 0.55);
@@ -5574,11 +5671,13 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }).join("");
     }
 
-    function renderMarkupLayer(rects, scale) {
+    function renderMarkupLayer(rects, scale, options = {}) {
       const content = rects
-        .map(item => renderCellMarkups(item.cell, item, scale))
+        .map(item => renderCellMarkups(item.cell, item, scale, options))
         .join("");
-      return `<g id="markupLayer" class="markup-layer">${content}</g>`;
+      const id = options.id || "markupLayer";
+      const className = options.className || (options.textOnly ? "markup-layer text-markup-layer" : "markup-layer");
+      return `<g id="${id}" class="${className}">${content}</g>`;
     }
 
     function renderAssemblyWindowCells(win, inner, scale, outlineColor, options = {}) {
@@ -5625,7 +5724,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         parts.push("</g>");
       }
       if (options.includeMarkups !== false) {
-        parts.push(`<g class="markup-layer assembly-markup-layer">${renderRects.map(item => renderCellMarkups(item.cell, item, scale)).join("")}</g>`);
+        parts.push(`<g class="markup-layer assembly-markup-layer">${renderRects.map(item => renderCellMarkups(item.cell, item, scale, { nonTextOnly: true })).join("")}</g>`);
       }
       return parts.join("");
     }
@@ -5838,10 +5937,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       }
       parts.push(renderEngineeringJoints(win, x, y, drawW, drawH));
       parts.push(renderCanvasCommandZones(win, x, y, drawW, drawH));
-      parts.push(renderMarkupLayer(renderRects, scale));
-      parts.push(renderWindowRootMarkups(win, { x, y, w: drawW, h: drawH }, scale));
+      parts.push(renderMarkupLayer(renderRects, scale, { nonTextOnly: true }));
       parts.push(renderWindowGeometryHandles(win, x, y, drawW, drawH, inner, scale, colEdges, rowEdges));
-      parts.push(`<g id="markupPreviewLayer" class="markup-preview-layer"></g>`);
 
       if (options.showDimensions) {
         const colTotal = sum(win.layout.columns);
@@ -5867,6 +5964,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (options.showPlanView) {
         parts.push(renderPlanView(win, rects, x, planY, drawW, outlineColor, frameColor, options));
       }
+      parts.push(renderMarkupLayer(renderRects, scale, { textOnly: true, id: "textMarkupLayer" }));
+      parts.push(renderWindowRootMarkups(win, { x, y, w: drawW, h: drawH }, scale));
+      parts.push(`<g id="markupPreviewLayer" class="markup-preview-layer"></g>`);
 
       setCanvasSvgContent(svg, parts);
       bindCanvasMarkupPlacement(svg);
@@ -5927,6 +6027,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         });
       });
       let markupDrag = null;
+      let markupResizeDrag = null;
+      let markupRotationDrag = null;
       svg.querySelectorAll(".cell-markup").forEach(group => {
         group.addEventListener("click", event => {
           event.stopPropagation();
@@ -5947,12 +6049,34 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           }
         });
         group.addEventListener("pointerdown", event => {
+          markupResizeDrag = beginMarkupResize(group, event) || markupResizeDrag;
+          if (markupResizeDrag) return;
+          markupRotationDrag = beginMarkupRotation(group, event) || markupRotationDrag;
+          if (markupRotationDrag) return;
           markupDrag = beginMarkupDrag(group, event) || markupDrag;
         });
         group.addEventListener("pointermove", event => {
+          if (markupResizeDrag) {
+            markupResizeDrag = updateMarkupResize(group, markupResizeDrag, event);
+            return;
+          }
+          if (markupRotationDrag) {
+            markupRotationDrag = updateMarkupRotation(group, markupRotationDrag, event);
+            return;
+          }
           markupDrag = updateMarkupDrag(group, markupDrag, event);
         });
         group.addEventListener("pointerup", event => {
+          if (commitMarkupResize(group, markupResizeDrag, event)) {
+            markupResizeDrag = null;
+            return;
+          }
+          markupResizeDrag = null;
+          if (commitMarkupRotation(group, markupRotationDrag, event)) {
+            markupRotationDrag = null;
+            return;
+          }
+          markupRotationDrag = null;
           if (commitMarkupDrag(group, markupDrag, event)) {
             markupDrag = null;
             return;
@@ -5960,6 +6084,16 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           markupDrag = null;
         });
         group.addEventListener("pointercancel", event => {
+          if (markupResizeDrag?.pointerId === event.pointerId) {
+            const found = findMarkupObject(group.dataset.markupId);
+            applyMarkupRotationPreview(group, found?.markup?.rotationDeg || 0);
+            markupResizeDrag = null;
+          }
+          if (markupRotationDrag?.pointerId === event.pointerId) {
+            const found = findMarkupObject(group.dataset.markupId);
+            applyMarkupRotationPreview(group, found?.markup?.rotationDeg || 0);
+            markupRotationDrag = null;
+          }
           if (markupDrag?.pointerId === event.pointerId) {
             group.removeAttribute("transform");
             markupDrag = null;
@@ -6418,6 +6552,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
 
     function beginMarkupDrag(group, event) {
       if (event.button !== 0 || canvasCommand.mode) return null;
+      if (event.target?.closest?.("[data-markup-rotate-handle], [data-markup-resize-handle]")) return null;
       event.preventDefault();
       event.stopPropagation();
       group.setPointerCapture?.(event.pointerId);
@@ -6428,6 +6563,162 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         startY: event.clientY,
         moved: false
       };
+    }
+
+    function markupPointerDistance(group, event) {
+      const svg = document.getElementById("windowSvg");
+      if (!svg) return 1;
+      const point = canvasPointFromMouse(svg, event);
+      const cx = Number(group.dataset.markupCx || 0);
+      const cy = Number(group.dataset.markupCy || 0);
+      return Math.max(1, Math.hypot(point.x - cx, point.y - cy));
+    }
+
+    function markupRotationPointerAngle(group, event) {
+      const svg = document.getElementById("windowSvg");
+      if (!svg) return 0;
+      const point = canvasPointFromMouse(svg, event);
+      const cx = Number(group.dataset.markupCx || 0);
+      const cy = Number(group.dataset.markupCy || 0);
+      return Math.atan2(point.y - cy, point.x - cx) * 180 / Math.PI;
+    }
+
+    function markupTextTransform(group, rotationDeg, scaleRatio = 1) {
+      const cx = Number(group.dataset.markupCx || 0);
+      const cy = Number(group.dataset.markupCy || 0);
+      const rotation = normalizeMarkupRotation(rotationDeg);
+      const transforms = [];
+      if (rotation) transforms.push(`rotate(${rotation} ${cx} ${cy})`);
+      if (Math.abs(scaleRatio - 1) > 0.001) transforms.push(`translate(${cx} ${cy}) scale(${scaleRatio}) translate(${-cx} ${-cy})`);
+      return transforms.join(" ");
+    }
+
+    function applyMarkupTransformPreview(group, rotationDeg, scaleRatio = 1) {
+      const rotor = group.querySelector(".cell-markup-text-rotor");
+      if (!rotor) return;
+      const transform = markupTextTransform(group, rotationDeg, scaleRatio);
+      if (transform) rotor.setAttribute("transform", transform);
+      else rotor.removeAttribute("transform");
+    }
+
+    function applyMarkupRotationPreview(group, rotationDeg) {
+      applyMarkupTransformPreview(group, rotationDeg, 1);
+    }
+
+    function applyMarkupResizePreview(group, sizeMm, startSizeMm) {
+      const found = findMarkupObject(group.dataset.markupId);
+      const rotation = found?.markup ? normalizeMarkupRotation(found.markup.rotationDeg) : 0;
+      const ratio = normalizeMarkupTextSize(sizeMm, startSizeMm) / Math.max(1, normalizeMarkupTextSize(startSizeMm, 80));
+      applyMarkupTransformPreview(group, rotation, ratio);
+    }
+
+    function beginMarkupResize(group, event) {
+      if (event.button !== 0 || canvasCommand.mode || !event.target?.closest?.("[data-markup-resize-handle]")) return null;
+      const found = findMarkupObject(group.dataset.markupId);
+      if (!found || found.markup.kind !== "text") return null;
+      event.preventDefault();
+      event.stopPropagation();
+      group.setPointerCapture?.(event.pointerId);
+      selectedWindowId = found.win.windowId;
+      const assembly = currentProjectAssembly();
+      selectedPlacementId = assembly?.placements?.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
+      selectedCell = found.hostType === "window" ? { row: 0, col: 0 } : { row: found.row, col: found.col };
+      selectedMarkupId = found.markup.markupId;
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      const startSize = normalizeMarkupTextSize(found.markup.sizeMm, 80);
+      return {
+        markupId: found.markup.markupId,
+        pointerId: event.pointerId,
+        startDistance: markupPointerDistance(group, event),
+        startSize,
+        nextSize: startSize,
+        moved: false
+      };
+    }
+
+    function updateMarkupResize(group, drag, event) {
+      if (!drag || drag.markupId !== group.dataset.markupId || drag.pointerId !== event.pointerId || canvasCommand.mode) return drag;
+      event.preventDefault();
+      event.stopPropagation();
+      const ratio = markupPointerDistance(group, event) / Math.max(1, drag.startDistance);
+      drag.nextSize = normalizeMarkupTextSize(drag.startSize * ratio, drag.startSize);
+      drag.moved = drag.moved || Math.abs(drag.nextSize - drag.startSize) > 0.5;
+      applyMarkupResizePreview(group, drag.nextSize, drag.startSize);
+      return drag;
+    }
+
+    function commitMarkupResize(group, drag, event) {
+      if (!drag || drag.markupId !== group.dataset.markupId || drag.pointerId !== event.pointerId || canvasCommand.mode) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      group.releasePointerCapture?.(event.pointerId);
+      const found = findMarkupObject(group.dataset.markupId);
+      if (!found) return false;
+      const nextSize = normalizeMarkupTextSize(drag.nextSize, found.markup.sizeMm);
+      found.markup.sizeMm = nextSize;
+      if (drag.moved || Math.abs(nextSize - drag.startSize) > 0.5) {
+        markDirty();
+        return true;
+      }
+      applyMarkupRotationPreview(group, found.markup.rotationDeg);
+      renderSelectedObjectProperties();
+      return false;
+    }
+
+    function beginMarkupRotation(group, event) {
+      if (event.button !== 0 || canvasCommand.mode || !event.target?.closest?.("[data-markup-rotate-handle]")) return null;
+      const found = findMarkupObject(group.dataset.markupId);
+      if (!found || found.markup.kind !== "text") return null;
+      event.preventDefault();
+      event.stopPropagation();
+      group.setPointerCapture?.(event.pointerId);
+      selectedWindowId = found.win.windowId;
+      const assembly = currentProjectAssembly();
+      selectedPlacementId = assembly?.placements?.find(placement => placement.windowId === selectedWindowId)?.placementId || "";
+      selectedCell = found.hostType === "window" ? { row: 0, col: 0 } : { row: found.row, col: found.col };
+      selectedMarkupId = found.markup.markupId;
+      selectedMemberId = "";
+      selectedJointId = "";
+      clearDividerSelection();
+      return {
+        markupId: found.markup.markupId,
+        pointerId: event.pointerId,
+        startAngle: markupRotationPointerAngle(group, event),
+        startRotation: normalizeMarkupRotation(found.markup.rotationDeg),
+        nextRotation: normalizeMarkupRotation(found.markup.rotationDeg),
+        moved: false
+      };
+    }
+
+    function updateMarkupRotation(group, drag, event) {
+      if (!drag || drag.markupId !== group.dataset.markupId || drag.pointerId !== event.pointerId || canvasCommand.mode) return drag;
+      event.preventDefault();
+      event.stopPropagation();
+      const angle = markupRotationPointerAngle(group, event);
+      drag.nextRotation = normalizeMarkupRotation(drag.startRotation + angle - drag.startAngle);
+      drag.moved = drag.moved || Math.abs(drag.nextRotation - drag.startRotation) > 0.4;
+      applyMarkupRotationPreview(group, drag.nextRotation);
+      return drag;
+    }
+
+    function commitMarkupRotation(group, drag, event) {
+      if (!drag || drag.markupId !== group.dataset.markupId || drag.pointerId !== event.pointerId || canvasCommand.mode) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      group.releasePointerCapture?.(event.pointerId);
+      const found = findMarkupObject(group.dataset.markupId);
+      if (!found) return false;
+      const nextRotation = normalizeMarkupRotation(drag.nextRotation, found.markup.rotationDeg);
+      found.markup.rotationDeg = nextRotation;
+      if (drag.moved || Math.abs(nextRotation - drag.startRotation) > 0.4) {
+        markDirty();
+        return true;
+      }
+      applyMarkupRotationPreview(group, found.markup.rotationDeg);
+      renderSelectedObjectProperties();
+      return false;
     }
 
     function updateMarkupDrag(group, drag, event) {
@@ -6654,9 +6945,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       input.type = "text";
       const position = markupPositionMm(found);
       input.value = found.markup.kind === "text"
-        ? `${found.markup.text || "文字标注"},${normalizeMarkupRotation(found.markup.rotationDeg)}`
+        ? `${found.markup.text || "文字标注"},${Math.round(normalizeMarkupTextSize(found.markup.sizeMm, 80))},${normalizeMarkupRotation(found.markup.rotationDeg)},${markupTextDirectionLabel(found.markup.direction)}`
         : `${Math.round(found.markup.sizeMm)},${Math.round(position.x)},${Math.round(position.y)},${normalizeMarkupRotation(found.markup.rotationDeg)}`;
-      input.placeholder = found.markup.kind === "text" ? "文字,角度°" : "尺寸mm,Xmm,Ymm,角度°";
+      input.placeholder = found.markup.kind === "text" ? "文字,字号mm,角度°,横排/竖排" : "尺寸mm,Xmm,Ymm,角度°";
       const bounds = shell.getBoundingClientRect();
       const left = Number.isFinite(event.clientX) ? event.clientX - bounds.left : bounds.width / 2;
       const top = Number.isFinite(event.clientY) ? event.clientY - bounds.top : bounds.height / 2;
@@ -6682,9 +6973,11 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         return;
       }
       if (found.markup.kind === "text") {
-        const parsed = parseMarkupTextRotation(input.value, found.markup.rotationDeg);
+        const parsed = parseMarkupTextEditor(input.value, found.markup.rotationDeg, found.markup.sizeMm, found.markup.direction);
         found.markup.text = parsed.text;
+        found.markup.sizeMm = parsed.sizeMm;
         found.markup.rotationDeg = parsed.rotationDeg;
+        found.markup.direction = parsed.direction;
       } else {
         const [size, xMm, yMm, rotationDeg] = input.value.split(/[,\s]+/).map(Number);
         const hostSize = markupHostSizeMm(found);
@@ -7023,13 +7316,17 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const showOpenState = Boolean(project.viewOptions?.showOpenState);
       const topY = topLeft.y - (showOpenState ? (shape.type === "arched" ? 108 : 92) : 30);
       const rightX = topLeft.x + drawW + (showOpenState ? 38 : 30);
-      for (let col = 0; col < win.layout.columns.length; col += 1) {
-        const widthMm = Number(win.widthMm || 0) * Number(win.layout.columns[col] || 0) / Math.max(1, colTotal);
-        parts.push(dimensionLine(colEdges[col], topY, colEdges[col + 1], topY, sizeRatioLabel(widthMm, win.layout.columns[col], colTotal)));
+      if (win.layout.columns.length > 1) {
+        for (let col = 0; col < win.layout.columns.length; col += 1) {
+          const widthMm = Number(win.widthMm || 0) * Number(win.layout.columns[col] || 0) / Math.max(1, colTotal);
+          parts.push(dimensionLine(colEdges[col], topY, colEdges[col + 1], topY, sizeRatioLabel(widthMm, win.layout.columns[col], colTotal)));
+        }
       }
-      for (let row = 0; row < win.layout.rows.length; row += 1) {
-        const heightMm = Number(win.heightMm || 0) * Number(win.layout.rows[row] || 0) / Math.max(1, rowTotal);
-        parts.push(dimensionLine(rightX, rowEdges[row], rightX, rowEdges[row + 1], sizeRatioLabel(heightMm, win.layout.rows[row], rowTotal), true));
+      if (win.layout.rows.length > 1) {
+        for (let row = 0; row < win.layout.rows.length; row += 1) {
+          const heightMm = Number(win.heightMm || 0) * Number(win.layout.rows[row] || 0) / Math.max(1, rowTotal);
+          parts.push(dimensionLine(rightX, rowEdges[row], rightX, rowEdges[row + 1], sizeRatioLabel(heightMm, win.layout.rows[row], rowTotal), true));
+        }
       }
       parts.push(`</g>`);
       return parts.join("");
@@ -7068,6 +7365,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const offsetY = (elevationHeight - (maxY - minY) * scale) / 2 - minY * scale;
       const mapElevation = (xMm, yMm) => ({ x: xMm * scale + offsetX, y: yMm * scale + offsetY });
       const parts = [svgPlanDefs()];
+      const assemblyTextMarkupParts = [];
 
       elevation.connectors.forEach(connector => {
         const joint = project.joints.find(candidate => candidate.jointId === connector.jointId);
@@ -7137,8 +7435,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
             parts.push(`<g class="open-sash-foreground-layer">${foregroundOpenCells.join("")}</g>`);
           }
         }
-        parts.push(`<g class="markup-layer assembly-markup-layer">${assemblyRenderRects.map(rect => renderCellMarkups(rect.cell, rect, scale)).join("")}</g>`);
-        parts.push(renderWindowRootMarkups(win, { x: topLeft.x, y: topLeft.y, w: drawW, h: drawH }, scale));
+        parts.push(`<g class="markup-layer assembly-markup-layer">${assemblyRenderRects.map(rect => renderCellMarkups(rect.cell, rect, scale, { nonTextOnly: true })).join("")}</g>`);
+        assemblyTextMarkupParts.push(`<g class="markup-layer assembly-text-markup-layer text-markup-layer" data-window-id="${escapeHtml(win.windowId)}">${assemblyRenderRects.map(rect => renderCellMarkups(rect.cell, rect, scale, { textOnly: true })).join("")}</g>`);
+        assemblyTextMarkupParts.push(renderWindowRootMarkups(win, { x: topLeft.x, y: topLeft.y, w: drawW, h: drawH }, scale, { className: "markup-layer root-markup-layer assembly-root-markup-layer text-markup-layer" }));
         parts.push(renderWindowGeometryHandles(
           win,
           topLeft.x,
@@ -7178,6 +7477,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (showPlanView) {
         parts.push(renderAssemblyPlanView(assembly, layout, view.w, elevationHeight + 12, view.h - elevationHeight - 86));
       }
+      parts.push(assemblyTextMarkupParts.join(""));
       parts.push(`<g id="markupPreviewLayer" class="markup-preview-layer"></g>`);
       setCanvasSvgContent(svg, parts);
       bindCanvasMarkupPlacement(svg);
@@ -7254,6 +7554,8 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         });
       });
       let markupDrag = null;
+      let markupResizeDrag = null;
+      let markupRotationDrag = null;
       svg.querySelectorAll(".cell-markup").forEach(group => {
         group.addEventListener("click", event => {
           event.stopPropagation();
@@ -7275,12 +7577,34 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           }
         });
         group.addEventListener("pointerdown", event => {
+          markupResizeDrag = beginMarkupResize(group, event) || markupResizeDrag;
+          if (markupResizeDrag) return;
+          markupRotationDrag = beginMarkupRotation(group, event) || markupRotationDrag;
+          if (markupRotationDrag) return;
           markupDrag = beginMarkupDrag(group, event) || markupDrag;
         });
         group.addEventListener("pointermove", event => {
+          if (markupResizeDrag) {
+            markupResizeDrag = updateMarkupResize(group, markupResizeDrag, event);
+            return;
+          }
+          if (markupRotationDrag) {
+            markupRotationDrag = updateMarkupRotation(group, markupRotationDrag, event);
+            return;
+          }
           markupDrag = updateMarkupDrag(group, markupDrag, event);
         });
         group.addEventListener("pointerup", event => {
+          if (commitMarkupResize(group, markupResizeDrag, event)) {
+            markupResizeDrag = null;
+            return;
+          }
+          markupResizeDrag = null;
+          if (commitMarkupRotation(group, markupRotationDrag, event)) {
+            markupRotationDrag = null;
+            return;
+          }
+          markupRotationDrag = null;
           if (commitMarkupDrag(group, markupDrag, event)) {
             markupDrag = null;
             return;
@@ -7288,6 +7612,16 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
           markupDrag = null;
         });
         group.addEventListener("pointercancel", event => {
+          if (markupResizeDrag?.pointerId === event.pointerId) {
+            const found = findMarkupObject(group.dataset.markupId);
+            applyMarkupRotationPreview(group, found?.markup?.rotationDeg || 0);
+            markupResizeDrag = null;
+          }
+          if (markupRotationDrag?.pointerId === event.pointerId) {
+            const found = findMarkupObject(group.dataset.markupId);
+            applyMarkupRotationPreview(group, found?.markup?.rotationDeg || 0);
+            markupRotationDrag = null;
+          }
           if (markupDrag?.pointerId === event.pointerId) {
             group.removeAttribute("transform");
             markupDrag = null;
@@ -8024,6 +8358,110 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       ];
     }
 
+    function edgeUnitVector(edge) {
+      const dx = edge.bottomPoint[0] - edge.topPoint[0];
+      const dy = edge.bottomPoint[1] - edge.topPoint[1];
+      const length = Math.hypot(dx, dy) || 1;
+      return { x: dx / length, y: dy / length, length };
+    }
+
+    function edgeNormalForSide(edge, sideDirection = 1) {
+      const unit = edgeUnitVector(edge);
+      let normal = { x: -unit.y, y: unit.x };
+      if (Math.sign(normal.x || sideDirection) !== Math.sign(sideDirection)) {
+        normal = { x: -normal.x, y: -normal.y };
+      }
+      return normal;
+    }
+
+    function edgeNormalToward(edge, towardPoint, fallbackDirection = 1) {
+      const unit = edgeUnitVector(edge);
+      let normal = { x: -unit.y, y: unit.x };
+      const center = edge.center || [
+        (edge.topPoint[0] + edge.bottomPoint[0]) / 2,
+        (edge.topPoint[1] + edge.bottomPoint[1]) / 2
+      ];
+      const dot = (towardPoint[0] - center[0]) * normal.x + (towardPoint[1] - center[1]) * normal.y;
+      if (Math.abs(dot) > 0.0001) {
+        if (dot < 0) normal = { x: -normal.x, y: -normal.y };
+      } else if (Math.sign(normal.x || fallbackDirection) !== Math.sign(fallbackDirection)) {
+        normal = { x: -normal.x, y: -normal.y };
+      }
+      return normal;
+    }
+
+    function projectPointFromHingeFrame(point, frame) {
+      const dx = point[0] - frame.origin[0];
+      const dy = point[1] - frame.origin[1];
+      const along = dx * frame.edgeUnit.x + dy * frame.edgeUnit.y;
+      const across = dx * frame.normal.x + dy * frame.normal.y;
+      const ratio = Math.max(-0.25, Math.min(1.25, across / Math.max(1, frame.acrossSpan)));
+      return [
+        frame.origin[0] + frame.edgeUnit.x * along + frame.normal.x * across * frame.openScale,
+        frame.origin[1] + frame.edgeUnit.y * along + frame.normal.y * across * frame.openScale + frame.projectionOffsetY * ratio
+      ];
+    }
+
+    function edgeBandPolygon(topPoint, bottomPoint, width) {
+      const unit = edgeUnitVector({ topPoint, bottomPoint });
+      const normal = { x: -unit.y, y: unit.x };
+      const half = Math.max(0.5, width / 2);
+      return [
+        [topPoint[0] + normal.x * half, topPoint[1] + normal.y * half],
+        [topPoint[0] - normal.x * half, topPoint[1] - normal.y * half],
+        [bottomPoint[0] - normal.x * half, bottomPoint[1] - normal.y * half],
+        [bottomPoint[0] + normal.x * half, bottomPoint[1] + normal.y * half]
+      ];
+    }
+
+    function edgePlatePolygon(centerPoint, edge, width, length) {
+      const unit = edgeUnitVector(edge);
+      const normal = { x: -unit.y, y: unit.x };
+      const halfWidth = Math.max(0.5, width / 2);
+      const halfLength = Math.max(1, length / 2);
+      return [
+        [
+          centerPoint[0] - unit.x * halfLength + normal.x * halfWidth,
+          centerPoint[1] - unit.y * halfLength + normal.y * halfWidth
+        ],
+        [
+          centerPoint[0] - unit.x * halfLength - normal.x * halfWidth,
+          centerPoint[1] - unit.y * halfLength - normal.y * halfWidth
+        ],
+        [
+          centerPoint[0] + unit.x * halfLength - normal.x * halfWidth,
+          centerPoint[1] + unit.y * halfLength - normal.y * halfWidth
+        ],
+        [
+          centerPoint[0] + unit.x * halfLength + normal.x * halfWidth,
+          centerPoint[1] + unit.y * halfLength + normal.y * halfWidth
+        ]
+      ];
+    }
+
+    function pointRatioBetweenEdges(point, hingeEdge, freeEdge, bounds) {
+      const verticalSpan = Math.max(1, bounds.height || bounds.h || 1);
+      const t = Math.max(0, Math.min(1, (point[1] - bounds.top) / verticalSpan));
+      const hingeAt = pointOnSegment(hingeEdge.topPoint, hingeEdge.bottomPoint, t);
+      const freeAt = pointOnSegment(freeEdge.topPoint, freeEdge.bottomPoint, t);
+      const vx = freeAt[0] - hingeAt[0];
+      const vy = freeAt[1] - hingeAt[1];
+      const lengthSq = vx * vx + vy * vy;
+      if (lengthSq <= 0.0001) return { t, u: 0 };
+      const u = ((point[0] - hingeAt[0]) * vx + (point[1] - hingeAt[1]) * vy) / lengthSq;
+      return { t, u: Math.max(0, Math.min(1, u)) };
+    }
+
+    function projectPointBetweenEdges(point, closedHingeEdge, closedFreeEdge, openHingeEdge, openFreeEdge, bounds) {
+      const { t, u } = pointRatioBetweenEdges(point, closedHingeEdge, closedFreeEdge, bounds);
+      const hingeAt = pointOnSegment(openHingeEdge.topPoint, openHingeEdge.bottomPoint, t);
+      const freeAt = pointOnSegment(openFreeEdge.topPoint, openFreeEdge.bottomPoint, t);
+      return [
+        hingeAt[0] + (freeAt[0] - hingeAt[0]) * u,
+        hingeAt[1] + (freeAt[1] - hingeAt[1]) * u
+      ];
+    }
+
     function offsetSegmentToward(start, end, toward, distance) {
       const dx = end[0] - start[0];
       const dy = end[1] - start[1];
@@ -8175,41 +8613,84 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const outward = assembly.openPlane === "out";
       const openRatio = cellOpeningRatio(cell);
       const openAngle = openRatio * 78 * Math.PI / 180;
-      const fixedHingeX = leftHinged ? left : left + width;
+      const shapedSash = Array.isArray(metrics.shapedPoints) && metrics.shapedPoints.length >= 3;
+      const closedHingeEdge = shapedSash ? polygonSideEdgeByX(metrics.shapedPoints, !leftHinged) : null;
+      const closedFreeEdge = shapedSash ? polygonSideEdgeByX(metrics.shapedPoints, leftHinged) : null;
+      const closedHingeTop = closedHingeEdge?.topPoint || [leftHinged ? left : left + width, top];
+      const closedHingeBottom = closedHingeEdge?.bottomPoint || [leftHinged ? left : left + width, top + height];
+      const closedFreeTop = closedFreeEdge?.topPoint || [leftHinged ? left + width : left, top];
+      const closedFreeBottom = closedFreeEdge?.bottomPoint || [leftHinged ? left + width : left, top + height];
+      const closedHingeCenter = closedHingeEdge?.center || [(closedHingeTop[0] + closedHingeBottom[0]) / 2, (closedHingeTop[1] + closedHingeBottom[1]) / 2];
+      const closedFreeCenter = closedFreeEdge?.center || [(closedFreeTop[0] + closedFreeBottom[0]) / 2, (closedFreeTop[1] + closedFreeBottom[1]) / 2];
+      const fixedHingeX = closedHingeCenter[0];
       const hingeX = fixedHingeX;
       const sideDirection = leftHinged ? -1 : 1;
       const sideProjection = Math.min(width * 0.055, Math.max(7, sashFace * 0.85)) * Math.sin(openAngle);
-      const hingeReturnX = hingeX + sideDirection * sideProjection;
-      const openProjectedWidth = width * Math.max(0.38, Math.cos(openAngle));
-      const freeX = leftHinged ? hingeX + openProjectedWidth : hingeX - openProjectedWidth;
       const projectionOffsetY = (outward ? -1 : 1) * Math.min(58, Math.max(0, height * 0.14 * Math.sin(openAngle)));
-      const topFreeY = top + projectionOffsetY;
-      const bottomFreeY = top + height + projectionOffsetY;
-      const leftTop = leftHinged ? [hingeX, top] : [freeX, topFreeY];
-      const rightTop = leftHinged ? [freeX, topFreeY] : [hingeX, top];
-      const leftBottom = leftHinged ? [hingeX, top + height] : [freeX, bottomFreeY];
-      const rightBottom = leftHinged ? [freeX, bottomFreeY] : [hingeX, top + height];
-      const projectClosedPoint = point => {
-        const u = Math.max(0, Math.min(1, (point[0] - left) / Math.max(1, width)));
-        const v = Math.max(0, Math.min(1, (point[1] - top) / Math.max(1, height)));
-        const topX = leftTop[0] + (rightTop[0] - leftTop[0]) * u;
-        const topY = leftTop[1] + (rightTop[1] - leftTop[1]) * u;
-        const bottomX = leftBottom[0] + (rightBottom[0] - leftBottom[0]) * u;
-        const bottomY = leftBottom[1] + (rightBottom[1] - leftBottom[1]) * u;
-        return [topX + (bottomX - topX) * v, topY + (bottomY - topY) * v];
+      const closedHinge = { topPoint: closedHingeTop, bottomPoint: closedHingeBottom, center: closedHingeCenter };
+      const openingNormal = edgeNormalToward(closedHinge, closedFreeCenter, leftHinged ? 1 : -1);
+      const hingeEdgeUnit = edgeUnitVector(closedHinge);
+      const projectedClosedSpan = Math.abs((closedFreeCenter[0] - closedHingeCenter[0]) * openingNormal.x + (closedFreeCenter[1] - closedHingeCenter[1]) * openingNormal.y);
+      const closedSideSpan = Math.max(1, projectedClosedSpan || Math.abs(closedFreeCenter[0] - closedHingeCenter[0]) || width);
+      const openScale = Math.max(0.38, Math.cos(openAngle));
+      const openProjectedWidth = closedSideSpan * openScale;
+      const hingeFrame = {
+        origin: closedHingeTop,
+        edgeUnit: hingeEdgeUnit,
+        normal: openingNormal,
+        acrossSpan: closedSideSpan,
+        openScale,
+        projectionOffsetY
       };
+      const projectClosedPoint = point => projectPointFromHingeFrame(point, hingeFrame);
+      const openHingeEdge = {
+        topPoint: projectClosedPoint(closedHingeTop),
+        bottomPoint: projectClosedPoint(closedHingeBottom)
+      };
+      openHingeEdge.center = [
+        (openHingeEdge.topPoint[0] + openHingeEdge.bottomPoint[0]) / 2,
+        (openHingeEdge.topPoint[1] + openHingeEdge.bottomPoint[1]) / 2
+      ];
+      const openFreeEdge = {
+        topPoint: projectClosedPoint(closedFreeTop),
+        bottomPoint: projectClosedPoint(closedFreeBottom)
+      };
+      openFreeEdge.center = [
+        (openFreeEdge.topPoint[0] + openFreeEdge.bottomPoint[0]) / 2,
+        (openFreeEdge.topPoint[1] + openFreeEdge.bottomPoint[1]) / 2
+      ];
+      const hingeReturnX = openHingeEdge.center[0] + sideDirection * sideProjection;
+      const freeX = openFreeEdge.center[0];
+      const topFreeY = openFreeEdge.topPoint[1];
+      const bottomFreeY = openFreeEdge.bottomPoint[1];
+      const leftTop = leftHinged ? openHingeEdge.topPoint : openFreeEdge.topPoint;
+      const rightTop = leftHinged ? openFreeEdge.topPoint : openHingeEdge.topPoint;
+      const leftBottom = leftHinged ? openHingeEdge.bottomPoint : openFreeEdge.bottomPoint;
+      const rightBottom = leftHinged ? openFreeEdge.bottomPoint : openHingeEdge.bottomPoint;
       const outer = metrics.shapedPoints?.length
         ? metrics.shapedPoints.map(projectClosedPoint)
         : [leftTop, rightTop, rightBottom, leftBottom];
-      const freeEdgeX = leftHinged ? rightTop[0] : leftTop[0];
+      const freeEdgeX = openFreeEdge.center[0];
+      const hingeNormal = edgeNormalForSide(openHingeEdge, sideDirection);
+      const hingeReturnTop = [
+        openHingeEdge.topPoint[0] + hingeNormal.x * sideProjection,
+        openHingeEdge.topPoint[1] + hingeNormal.y * sideProjection + projectionOffsetY * 0.72
+      ];
+      const hingeReturnBottom = [
+        openHingeEdge.bottomPoint[0] + hingeNormal.x * sideProjection,
+        openHingeEdge.bottomPoint[1] + hingeNormal.y * sideProjection + projectionOffsetY * 0.72
+      ];
       const sideFace = [
-        [hingeReturnX, top + projectionOffsetY * 0.72],
-        [hingeX, top],
-        [hingeX, top + height],
-        [hingeReturnX, top + height + projectionOffsetY * 0.72]
+        hingeReturnTop,
+        openHingeEdge.topPoint,
+        openHingeEdge.bottomPoint,
+        hingeReturnBottom
       ];
       const hingeChannelW = Math.max(4, Math.min(10, sashFace * 0.46));
       const hingeChannelX = hingeX - hingeChannelW / 2;
+      const hingeMinY = Math.min(openHingeEdge.topPoint[1], openHingeEdge.bottomPoint[1]);
+      const hingeMaxY = Math.max(openHingeEdge.topPoint[1], openHingeEdge.bottomPoint[1]);
+      const hingeChannelPoints = edgeBandPolygon(openHingeEdge.topPoint, openHingeEdge.bottomPoint, hingeChannelW);
       return {
         ...metrics,
         leftHinged,
@@ -8219,7 +8700,7 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         fixedHingeX,
         hingeX,
         hingeReturnX,
-        hingeCenterY: top + height / 2,
+        hingeCenterY: openHingeEdge.center[1],
         freeX: freeEdgeX,
         topFreeY,
         bottomFreeY,
@@ -8228,11 +8709,18 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         sideFace,
         hingeChannelX,
         hingeChannelW,
+        hingeChannelY: hingeMinY,
+        hingeChannelH: Math.max(1, hingeMaxY - hingeMinY),
+        hingeChannelPoints,
+        hingeNormal,
+        openHingeEdge,
+        openFreeEdge,
         leftTop,
         rightTop,
         leftBottom,
         rightBottom,
-        outer
+        outer,
+        projectClosedPoint
 	      };
 	    }
 
@@ -8345,8 +8833,10 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         bottomFreeY,
         projectionOffsetY,
         sideFace,
-        hingeChannelX,
         hingeChannelW,
+        hingeChannelPoints,
+        hingeNormal,
+        openHingeEdge,
         leftTop,
         rightTop,
         leftBottom,
@@ -8373,24 +8863,41 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       const directionX = (hingeX + freeTopPoint[0]) / 2;
       const directionY = Math.max(Math.min(top, topFreeY) + 18, Math.min(top + height - 12, (top + topFreeY) / 2 + sashFace * 0.7));
       const hasHostedLock = normalizeCellMarkups(cell.markups).some(markup => markup.kind === "lock");
-      const hingePlateX = hingeX - Math.max(1.5, sashFace * 0.16);
       const hingePlateW = Math.max(3, sashFace * 0.32);
-      const hingePlateH = Math.max(10, Math.min(20, height * 0.12));
-      const hingePlateYs = [top + height * 0.22, top + height * 0.78];
+      const hingeEdgeLength = Math.hypot(
+        openHingeEdge.bottomPoint[0] - openHingeEdge.topPoint[0],
+        openHingeEdge.bottomPoint[1] - openHingeEdge.topPoint[1]
+      );
+      const hingePlateH = Math.max(10, Math.min(20, hingeEdgeLength * 0.18));
+      const hingePlatePoints = [
+        pointOnSegment(openHingeEdge.topPoint, openHingeEdge.bottomPoint, 0.22),
+        pointOnSegment(openHingeEdge.topPoint, openHingeEdge.bottomPoint, 0.78)
+      ];
       const sideFacePoints = sideFace.map(point => point.join(",")).join(" ");
-      const strapX = hingeX + (leftHinged ? -1 : 1) * Math.max(4, Math.abs(hingeReturnX - hingeX) * 0.72);
+      const hingeChannelSvgPoints = hingeChannelPoints.map(point => point.join(",")).join(" ");
+      const strapOffset = Math.max(4, Math.abs(hingeReturnX - hingeX) * 0.72);
       const strapShiftY = projectionOffsetY * 0.28;
+      const strapTop = pointOnSegment(openHingeEdge.topPoint, openHingeEdge.bottomPoint, 0.2);
+      const strapBottom = pointOnSegment(openHingeEdge.topPoint, openHingeEdge.bottomPoint, 0.8);
+      const strapTopEnd = [
+        strapTop[0] + hingeNormal.x * strapOffset,
+        strapTop[1] + hingeNormal.y * strapOffset + strapShiftY
+      ];
+      const strapBottomEnd = [
+        strapBottom[0] + hingeNormal.x * strapOffset,
+        strapBottom[1] + hingeNormal.y * strapOffset + strapShiftY
+      ];
       return `
         <g class="open-sash-elevation">
           <polygon class="open-sash-side-face" points="${sideFacePoints}" fill="${frameColor}" stroke="${outlineColor}" stroke-width="1.25" />
-          <rect class="open-sash-hinge-channel" x="${hingeChannelX}" y="${top}" width="${hingeChannelW}" height="${height}" />
+          <polygon class="open-sash-hinge-channel" points="${hingeChannelSvgPoints}" />
           <polygon class="sash-profile-glass open-sash-glass" points="${inner.map(point => point.join(",")).join(" ")}" fill="${glassFill}" />
           ${shapedSash
             ? renderSashProfilePolygon(outer, sashFace, frameColor, outlineColor)
             : renderOpenSashProfileBands(outer, sashFace, frameColor, outlineColor, leftHinged)}
-          <path class="sash-mechanism-link" d="M${fixedHingeX} ${top + height * 0.2} L${strapX} ${top + height * 0.2 + strapShiftY} M${fixedHingeX} ${top + height * 0.8} L${strapX} ${top + height * 0.8 + strapShiftY}" />
-          <line class="sash-hinge-axis" x1="${hingeX}" y1="${top}" x2="${hingeX}" y2="${top + height}" />
-          ${hingePlateYs.map(y => `<rect class="sash-hinge-plate" x="${hingePlateX}" y="${y - hingePlateH / 2}" width="${hingePlateW}" height="${hingePlateH}" rx="1" />`).join("")}
+          <path class="sash-mechanism-link" d="M${strapTop[0]} ${strapTop[1]} L${strapTopEnd[0]} ${strapTopEnd[1]} M${strapBottom[0]} ${strapBottom[1]} L${strapBottomEnd[0]} ${strapBottomEnd[1]}" />
+          <line class="sash-hinge-axis" x1="${openHingeEdge.topPoint[0]}" y1="${openHingeEdge.topPoint[1]}" x2="${openHingeEdge.bottomPoint[0]}" y2="${openHingeEdge.bottomPoint[1]}" />
+          ${hingePlatePoints.map(point => `<polygon class="sash-hinge-plate" points="${edgePlatePolygon(point, openHingeEdge, hingePlateW, hingePlateH).map(platePoint => platePoint.join(",")).join(" ")}" />`).join("")}
           ${openingDirectionSvgLabel(cell, directionX, directionY)}
           <path class="opening-symbol-line" d="${openLine}" />
           ${hasHostedLock ? "" : `<line class="sash-profile-handle" x1="${handleX}" y1="${handleY - 9}" x2="${handleX}" y2="${handleY + 9}" />`}
@@ -11703,9 +12210,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
     function createThreeTextPlane(text, color = "#145da0", height = 0.13, options = {}) {
       const THREE = threeLib;
       const boxed = options.boxed !== false;
+      const direction = normalizeMarkupTextDirection(options.direction);
+      const vertical = direction === "vertical";
+      const chars = Array.from(String(text || ""));
       const canvas = document.createElement("canvas");
-      canvas.width = 512;
-      canvas.height = 128;
+      canvas.width = vertical ? 256 : 512;
+      canvas.height = vertical ? 512 : 128;
       const context = canvas.getContext("2d");
       context.clearRect(0, 0, canvas.width, canvas.height);
       if (boxed) {
@@ -11716,10 +12226,20 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         context.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
       }
       context.fillStyle = color;
-      context.font = '700 46px "Microsoft YaHei", sans-serif';
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillText(String(text || ""), canvas.width / 2, canvas.height / 2 + 2);
+      if (vertical) {
+        const fontPx = Math.max(28, Math.min(46, 420 / Math.max(1, chars.length)));
+        const gap = fontPx * 1.18;
+        const startY = canvas.height / 2 - (chars.length - 1) * gap / 2;
+        context.font = `700 ${fontPx}px "Microsoft YaHei", sans-serif`;
+        chars.forEach((char, index) => {
+          context.fillText(char === " " ? "\u00A0" : char, canvas.width / 2, startY + index * gap);
+        });
+      } else {
+        context.font = '700 46px "Microsoft YaHei", sans-serif';
+        context.fillText(String(text || ""), canvas.width / 2, canvas.height / 2 + 2);
+      }
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
       const material = new THREE.MeshBasicMaterial({
@@ -11728,7 +12248,9 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         depthWrite: false,
         side: THREE.DoubleSide
       });
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(height * 4, height), material);
+      const geometryWidth = vertical ? height * 1.45 : height * 4;
+      const geometryHeight = vertical ? height * Math.max(1.8, chars.length * 0.92) : height;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(geometryWidth, geometryHeight), material);
       plane.renderOrder = 18;
       return plane;
     }
@@ -11806,9 +12328,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       markups.forEach(markup => {
         const x = -width / 2 + width * Number(markup.xPercent || 0) / 100;
         const y = height / 2 - height * Number(markup.yPercent || 0) / 100;
-        const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", Math.max(0.1, Math.min(0.22, height * 0.075)));
+        const labelHeight = Math.max(0.06, Math.min(0.32, normalizeMarkupTextSize(markup.sizeMm, 80) * scale));
+        const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", labelHeight, { direction: markup.direction });
         label.position.set(x, y, depth / 2 + Math.max(0.045, 52 * scale));
         label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180;
+        label.material.depthTest = false;
+        label.renderOrder = 60;
         label.userData.mountType = "window-root-text-annotation";
         parent.add(label);
       });
@@ -11901,9 +12426,12 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
         const { x, y } = threeMarkupPositionFrom2dPercent(markup, cell, rect, options);
         const size = Math.max(0.028, markup.sizeMm * scale);
         if (markup.kind === "text") {
-          const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", Math.max(0.1, Math.min(0.2, rect.h * 0.09)));
+          const labelHeight = Math.max(0.06, Math.min(0.32, normalizeMarkupTextSize(markup.sizeMm, 80) * scale));
+          const label = createThreeTextPlane(markup.text || "文字标注", "#075bbd", labelHeight, { direction: markup.direction });
           label.position.set(x, y, z + 0.012);
           label.rotation.z = -normalizeMarkupRotation(markup.rotationDeg) * Math.PI / 180;
+          label.material.depthTest = false;
+          label.renderOrder = 60;
           label.userData.mountType = "cell-text-annotation";
           parent.add(label);
           return;
@@ -14179,14 +14707,17 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       if (markup) {
         const rootHosted = markup.hostType === "window";
         const position = markupPositionMm(markup);
+        const textMarkup = markup.markup.kind === "text";
         return {
-          title: markup.markup.kind === "text" ? "文字标注" : markupToolLabel(markup.markup.kind),
+          title: textMarkup ? "文字标注" : markupToolLabel(markup.markup.kind),
           rows: [
             ["对象", markup.markup.markupId],
             ["所属窗", markup.win.mark],
             ["所属格", rootHosted ? "窗体根节点" : `${markup.row + 1}行 ${markup.col + 1}列`],
             ["宿主", rootHosted ? "窗体根节点" : (markup.markup.hostCellId || markup.cell.cellId)],
-            ["内容/尺寸", markup.markup.kind === "text" ? markup.markup.text : `${Math.round(markup.markup.sizeMm)} mm`],
+            ["内容/尺寸", textMarkup ? markup.markup.text : `${Math.round(markup.markup.sizeMm)} mm`],
+            ...(textMarkup ? [["字号", `${Math.round(normalizeMarkupTextSize(markup.markup.sizeMm, 80))} mm`]] : []),
+            ...(textMarkup ? [["方向", markupTextDirectionLabel(markup.markup.direction)]] : []),
             ["位置", `${Math.round(position.x)} mm, ${Math.round(position.y)} mm`],
             ["旋转", `${normalizeMarkupRotation(markup.markup.rotationDeg)}°`]
           ]
@@ -14298,16 +14829,88 @@ const PROJECT_STATUS_OPTIONS = Object.freeze([
       return { title: "未选择对象", rows: [] };
     }
 
+    function renderSelectedMarkupEditor(markupContext) {
+      if (!markupContext || markupContext.markup.kind !== "text") return "";
+      const markup = markupContext.markup;
+      const position = markupPositionMm(markupContext);
+      const text = escapeHtml(markup.text || "文字标注");
+      return `
+        <label class="selected-object-row selected-object-edit-row">
+          <span>文字</span>
+          <input class="selected-object-input" data-markup-field="text" type="text" value="${text}" />
+        </label>
+        <label class="selected-object-row selected-object-edit-row">
+          <span>字号</span>
+          <input class="selected-object-input" data-markup-field="sizeMm" type="number" min="20" max="500" step="1" value="${Math.round(normalizeMarkupTextSize(markup.sizeMm, 80))}" />
+        </label>
+        <label class="selected-object-row selected-object-edit-row">
+          <span>方向</span>
+          <select class="selected-object-input" data-markup-field="direction">
+            <option value="horizontal" ${normalizeMarkupTextDirection(markup.direction) === "horizontal" ? "selected" : ""}>横排</option>
+            <option value="vertical" ${normalizeMarkupTextDirection(markup.direction) === "vertical" ? "selected" : ""}>竖排</option>
+          </select>
+        </label>
+        <label class="selected-object-row selected-object-edit-row">
+          <span>旋转</span>
+          <input class="selected-object-input" data-markup-field="rotationDeg" type="number" min="0" max="360" step="1" value="${normalizeMarkupRotation(markup.rotationDeg)}" />
+        </label>
+        <label class="selected-object-row selected-object-edit-row">
+          <span>X位置</span>
+          <input class="selected-object-input" data-markup-field="xMm" type="number" step="1" value="${Math.round(position.x)}" />
+        </label>
+        <label class="selected-object-row selected-object-edit-row">
+          <span>Y位置</span>
+          <input class="selected-object-input" data-markup-field="yMm" type="number" step="1" value="${Math.round(position.y)}" />
+        </label>
+      `;
+    }
+
+    function updateSelectedMarkupFromPropertyInput(event) {
+      const input = event.target?.closest?.("[data-markup-field]");
+      if (!input || !selectedMarkupId) return;
+      const found = findMarkupObject(selectedMarkupId);
+      if (!found || found.markup.kind !== "text") return;
+      const field = input.dataset.markupField;
+      const value = input.value;
+      const hostSize = markupHostSizeMm(found);
+      const numericValue = Number(value);
+      if (field === "text") {
+        found.markup.text = String(value || "").trim() || "文字标注";
+      } else if (field === "sizeMm") {
+        found.markup.sizeMm = normalizeMarkupTextSize(value, found.markup.sizeMm);
+      } else if (field === "direction") {
+        found.markup.direction = normalizeMarkupTextDirection(value, found.markup.direction);
+      } else if (field === "rotationDeg") {
+        found.markup.rotationDeg = normalizeMarkupRotation(value, found.markup.rotationDeg);
+      } else if (field === "xMm" && hostSize.width > 0 && Number.isFinite(numericValue)) {
+        const min = found.hostType === "window" ? -100 : 0;
+        const max = found.hostType === "window" ? 200 : 100;
+        found.markup.xPercent = Math.max(min, Math.min(max, numericValue / hostSize.width * 100));
+      } else if (field === "yMm" && hostSize.height > 0 && Number.isFinite(numericValue)) {
+        const min = found.hostType === "window" ? -100 : 0;
+        const max = found.hostType === "window" ? 200 : 100;
+        found.markup.yPercent = Math.max(min, Math.min(max, numericValue / hostSize.height * 100));
+      }
+      found.markup.offsetXPercent = Number(found.markup.xPercent || 0) - 50;
+      found.markup.offsetYPercent = Number(found.markup.yPercent || 0) - 50;
+      markDirty();
+    }
+
     function renderSelectedObjectProperties() {
       const holder = document.getElementById("selectedObjectProperties");
       if (!holder) return;
       const data = selectedObjectRows();
+      const selectedMarkup = selectedMarkupId ? findMarkupObject(selectedMarkupId) : null;
       holder.innerHTML = `
         <div class="selected-object-row"><span>当前对象</span><strong>${escapeHtml(data.title)}</strong></div>
         ${data.rows.map(([key, value]) => `
           <div class="selected-object-row"><span>${escapeHtml(key)}</span><strong>${escapeHtml(String(value ?? "-"))}</strong></div>
         `).join("")}
+        ${renderSelectedMarkupEditor(selectedMarkup)}
       `;
+      holder.querySelectorAll("[data-markup-field]").forEach(input => {
+        input.addEventListener("change", updateSelectedMarkupFromPropertyInput);
+      });
     }
 
     function handleObjectTreeClick(event) {

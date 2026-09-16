@@ -1269,6 +1269,10 @@
       pointer-events: none;
     }
 
+    .text-markup-layer {
+      isolation: isolate;
+    }
+
     .markup-preview-layer,
     .markup-placement-preview {
       pointer-events: none;
@@ -1290,6 +1294,77 @@
       paint-order: stroke;
       stroke: #fff;
       stroke-width: 3px;
+    }
+
+    .cell-markup-rotate-handle,
+    .cell-markup-resize-handle {
+      display: none;
+      pointer-events: all;
+    }
+
+    .cell-markup.text.active .cell-markup-rotate-handle,
+    .cell-markup.root-markup.active .cell-markup-rotate-handle,
+    .cell-markup.text.active .cell-markup-resize-handle,
+    .cell-markup.root-markup.active .cell-markup-resize-handle {
+      display: inline;
+    }
+
+    .cell-markup-rotate-handle {
+      cursor: grab;
+    }
+
+    .cell-markup-rotate-handle:active {
+      cursor: grabbing;
+    }
+
+    .cell-markup-resize-handle {
+      cursor: nwse-resize;
+    }
+
+    .cell-markup-rotate-stem {
+      stroke: #1677ff;
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cell-markup-rotate-dot {
+      fill: #fff;
+      stroke: #1677ff;
+      stroke-width: 1.8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cell-markup-rotate-icon {
+      fill: none;
+      stroke: #1677ff;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+      pointer-events: none;
+    }
+
+    .cell-markup-resize-stem {
+      stroke: #1677ff;
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cell-markup-resize-box {
+      fill: #fff;
+      stroke: #1677ff;
+      stroke-width: 1.8;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cell-markup-resize-icon {
+      fill: none;
+      stroke: #1677ff;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+      pointer-events: none;
     }
 
     .cell-lock-body {
@@ -3824,7 +3899,7 @@
     }
 
     .canvas-markup-input {
-      width: 180px;
+      width: 240px;
     }
 
     .object-tree {
@@ -3951,6 +4026,29 @@
       min-width: 0;
       overflow-wrap: anywhere;
       font-weight: 700;
+    }
+
+    .selected-object-edit-row {
+      background: #fff;
+      border-color: #cfe0f2;
+    }
+
+    .selected-object-input {
+      width: 100%;
+      min-width: 0;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid #c7d7e8;
+      border-radius: 3px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+    }
+
+    .selected-object-input:focus {
+      outline: 2px solid rgba(22, 119, 255, 0.22);
+      border-color: var(--primary);
     }
 
     .bom-kpis {
